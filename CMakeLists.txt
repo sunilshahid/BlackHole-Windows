@@ -33,6 +33,7 @@ target_link_libraries(BlackHole PRIVATE
     shell32
     user32
     gdi32
+    crypt32
 )
 
 # Copy UI directory to build output so BlackHole.exe can find index.html

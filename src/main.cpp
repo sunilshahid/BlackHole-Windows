@@ -23,6 +23,9 @@
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "crypt32.lib")
+#include <wincrypt.h>
+#include <fstream>
 
 using namespace Microsoft::WRL;
 
@@ -223,6 +226,27 @@ static void HandleWebMessage(const std::string& msgJson) {
     else if (action == "cancel_transfer") {
         g_network->cancelTransfer();
     }
+    else if (action == "save_file") {
+        std::string filename = req.get("filename").asString();
+        std::string base64Data = req.get("dataBase64").asString();
+        if (!filename.empty() && !base64Data.empty()) {
+            std::filesystem::path destDir(g_settings.destinationFolder);
+            std::filesystem::create_directories(destDir);
+            std::filesystem::path fullPath = destDir / filename;
+
+            DWORD binLen = 0;
+            if (CryptStringToBinaryA(base64Data.c_str(), (DWORD)base64Data.length(), CRYPT_STRING_BASE64, NULL, &binLen, NULL, NULL)) {
+                std::vector<BYTE> buffer(binLen);
+                if (CryptStringToBinaryA(base64Data.c_str(), (DWORD)base64Data.length(), CRYPT_STRING_BASE64, buffer.data(), &binLen, NULL, NULL)) {
+                    std::ofstream out(fullPath, std::ios::binary);
+                    if (out.is_open()) {
+                        out.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+                        out.close();
+                    }
+                }
+            }
+        }
+    }
 }
 
 // Window Procedure
@@ -387,6 +411,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                                     }).Get(),
                                 &token
                             );
+
+                            // Auto-save incoming downloaded files directly to destinationFolder without prompts
+                            ComPtr<ICoreWebView2_4> webview4;
+                            if (SUCCEEDED(g_webview.As(&webview4)) && webview4) {
+                                EventRegistrationToken downloadToken;
+                                webview4->add_DownloadStarting(
+                                    Callback<ICoreWebView2DownloadStartingEventHandler>(
+                                        [](ICoreWebView2*, ICoreWebView2DownloadStartingEventArgs* args) -> HRESULT {
+                                            args->put_Handled(TRUE);
+                                            LPWSTR resultFilePath = nullptr;
+                                            if (SUCCEEDED(args->get_ResultFilePath(&resultFilePath)) && resultFilePath) {
+                                                std::filesystem::path origPath(resultFilePath);
+                                                std::wstring destDir = Utf8ToWide(g_settings.destinationFolder);
+                                                if (!destDir.empty()) {
+                                                    std::filesystem::create_directories(destDir);
+                                                    std::wstring targetPath = destDir + L"\\" + origPath.filename().wstring();
+                                                    args->put_ResultFilePath(targetPath.c_str());
+                                                }
+                                                CoTaskMemFree(resultFilePath);
+                                            }
+                                            return S_OK;
+                                        }).Get(),
+                                    &downloadToken
+                                );
+                            }
 
                             // Navigate to UI index.html
                             std::filesystem::path currentPath = std::filesystem::current_path();
