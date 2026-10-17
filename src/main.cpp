@@ -331,6 +331,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         break;
     }
     case WM_DESTROY:
+        if (g_controller) {
+            g_controller->Close();
+            g_controller = nullptr;
+        }
+        g_webview = nullptr;
         PostQuitMessage(0);
         break;
     default:
@@ -339,99 +344,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     return 0;
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
-    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-
-    // Load Settings
-    g_settings = BlackHole::ConfigManager::load();
-
-    // Start Network Engine
-    g_network = std::make_unique<BlackHole::NetworkEngine>();
-    g_network->setPeerCallback([](const std::vector<BlackHole::PeerDevice>& peers) {
-        BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
-        resp.set("type", "peers_updated");
-        BlackHole::JsonValue arr = BlackHole::JsonValue::Array();
-        for (auto const& p : peers) {
-            BlackHole::JsonValue pObj = BlackHole::JsonValue::Object();
-            pObj.set("ip", p.ip);
-            pObj.set("port", p.port);
-            pObj.set("alias", p.alias);
-            pObj.set("deviceType", p.deviceType);
-            arr.push(pObj);
-        }
-        resp.set("peers", arr);
-        PostJsonToWebview(resp.serialize());
-    });
-
-    g_network->setTransferCallback([](const BlackHole::TransferEvent& ev) {
-        BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
-        resp.set("type", "transfer_event");
-        resp.set("eventType", ev.type);
-        resp.set("peerIp", ev.peerIp);
-        resp.set("peerAlias", ev.peerAlias);
-        resp.set("currentFileName", ev.currentFileName);
-        resp.set("bytesTransferred", ev.bytesTransferred);
-        resp.set("totalBytes", ev.totalBytes);
-        resp.set("speedMBs", ev.speedMBs);
-        resp.set("progressPercent", ev.progressPercent);
-        resp.set("message", ev.message);
-        PostJsonToWebview(resp.serialize());
-    });
-
-    g_network->start();
-
-    // Register Win32 Window
-    WNDCLASSEXW wcex = { sizeof(WNDCLASSEXW) };
-    wcex.style = CS_HREDRAW | CS_VREDRAW;
-    wcex.lpfnWndProc = WndProc;
-    wcex.hInstance = hInstance;
-    wcex.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
-    wcex.hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
-    wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wcex.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
-    wcex.lpszClassName = L"BlackHoleWindowClass";
-    RegisterClassExW(&wcex);
-
-    // Create Main Window
-    g_hWnd = CreateWindowW(
-        L"BlackHoleWindowClass",
-        L"BlackHole - Zero-Knowledge Native P2P",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 1020, 720,
-        nullptr, nullptr, hInstance, nullptr
-    );
-
-    if (!g_hWnd) return FALSE;
-
-    // Explicitly set taskbar and title bar icons and full Unicode title
-    SendMessage(g_hWnd, WM_SETICON, ICON_BIG, (LPARAM)wcex.hIcon);
-    SendMessage(g_hWnd, WM_SETICON, ICON_SMALL, (LPARAM)wcex.hIconSm);
-    SetWindowTextW(g_hWnd, L"BlackHole - Zero-Knowledge Native P2P");
-
-    // Enable Immersive Dark Mode in Windows Title Bar
-    BOOL darkMode = TRUE;
-    DwmSetWindowAttribute(g_hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
-
-    ShowWindow(g_hWnd, SW_SHOWNORMAL);
-    UpdateWindow(g_hWnd);
-
-    // Ensure LocalAppData\BlackHole\WebView2 exists for browser state
-    PWSTR localAppData = nullptr;
-    std::wstring webViewDataDir = L"";
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &localAppData))) {
-        std::wstring appDataDir = std::wstring(localAppData) + L"\\BlackHole";
-        webViewDataDir = appDataDir + L"\\WebView2";
-        CreateDirectoryW(appDataDir.c_str(), NULL);
-        CreateDirectoryW(webViewDataDir.c_str(), NULL);
-        CoTaskMemFree(localAppData);
+// Forward declare WebView initialization with fallback capability
+static void InitializeWebView(HWND hWnd, const std::wstring& baseDataDir, bool isFallback = false) {
+    std::wstring actualDataDir = baseDataDir;
+    if (isFallback) {
+        // Fallback to process-isolated profile folder to bypass any locks or collisions
+        actualDataDir = baseDataDir + L"\\Session_" + std::to_wstring(GetCurrentProcessId());
+        CreateDirectoryW(actualDataDir.c_str(), NULL);
     }
 
-    // Initialize WebView2
     HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(
-        nullptr, webViewDataDir.c_str(), nullptr,
+        nullptr, actualDataDir.c_str(), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-            [hWnd = g_hWnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+            [hWnd, baseDataDir, isFallback](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
                 if (FAILED(result) || !env) {
+                    if (!isFallback) {
+                        InitializeWebView(hWnd, baseDataDir, true);
+                        return S_OK;
+                    }
                     WCHAR err[256];
                     wsprintfW(err, L"WebView2 Environment creation failed: 0x%08X", result);
                     MessageBoxW(hWnd, err, L"BlackHole Error", MB_ICONERROR);
@@ -441,8 +371,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                 env->CreateCoreWebView2Controller(
                     hWnd,
                     Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                        [hWnd](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
+                        [hWnd, baseDataDir, isFallback](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
                             if (FAILED(result) || !controller) {
+                                if (!isFallback) {
+                                    // Automatic fallback to clean session directory
+                                    InitializeWebView(hWnd, baseDataDir, true);
+                                    return S_OK;
+                                }
                                 WCHAR err[256];
                                 wsprintfW(err, L"WebView2 Controller creation failed: 0x%08X", result);
                                 MessageBoxW(hWnd, err, L"BlackHole Error", MB_ICONERROR);
@@ -508,13 +443,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                                 );
                             }
 
-                            // Navigate to UI index.html
-                            std::filesystem::path currentPath = std::filesystem::current_path();
-                            std::filesystem::path uiPath = currentPath / "ui" / "index.html";
+                            // Resolve UI path reliably relative to the executable
+                            WCHAR exePath[MAX_PATH] = { 0 };
+                            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+                            std::filesystem::path appDir = std::filesystem::path(exePath).parent_path();
+                            std::filesystem::path uiPath = appDir / "ui" / "index.html";
 
-                            // Fallback if launched from build/ directory
                             if (!std::filesystem::exists(uiPath)) {
-                                uiPath = currentPath / ".." / "ui" / "index.html";
+                                uiPath = appDir / ".." / "ui" / "index.html";
+                            }
+                            if (!std::filesystem::exists(uiPath)) {
+                                uiPath = std::filesystem::current_path() / "ui" / "index.html";
                             }
 
                             std::wstring uiUri = L"file:///" + uiPath.wstring();
@@ -529,6 +468,116 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                 return S_OK;
             }).Get()
     );
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
+    // 1. Single Instance Check: Bring existing window to front if already open
+    HANDLE hMutex = CreateMutexW(NULL, TRUE, L"BlackHole_Native_SingleInstance_Mutex_v1");
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        HWND hExisting = FindWindowW(L"BlackHoleWindowClass", NULL);
+        if (hExisting) {
+            if (IsIconic(hExisting)) {
+                ShowWindow(hExisting, SW_RESTORE);
+            } else {
+                ShowWindow(hExisting, SW_SHOW);
+            }
+            SetForegroundWindow(hExisting);
+        }
+        if (hMutex) CloseHandle(hMutex);
+        return 0; // Clean exit without error
+    }
+
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    // Load Settings
+    g_settings = BlackHole::ConfigManager::load();
+
+    // Start Network Engine
+    g_network = std::make_unique<BlackHole::NetworkEngine>();
+    g_network->setPeerCallback([](const std::vector<BlackHole::PeerDevice>& peers) {
+        BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
+        resp.set("type", "peers_updated");
+        BlackHole::JsonValue arr = BlackHole::JsonValue::Array();
+        for (auto const& p : peers) {
+            BlackHole::JsonValue pObj = BlackHole::JsonValue::Object();
+            pObj.set("ip", p.ip);
+            pObj.set("port", p.port);
+            pObj.set("alias", p.alias);
+            pObj.set("deviceType", p.deviceType);
+            arr.push(pObj);
+        }
+        resp.set("peers", arr);
+        PostJsonToWebview(resp.serialize());
+    });
+
+    g_network->setTransferCallback([](const BlackHole::TransferEvent& ev) {
+        BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
+        resp.set("type", "transfer_event");
+        resp.set("eventType", ev.type);
+        resp.set("peerIp", ev.peerIp);
+        resp.set("peerAlias", ev.peerAlias);
+        resp.set("currentFileName", ev.currentFileName);
+        resp.set("bytesTransferred", ev.bytesTransferred);
+        resp.set("totalBytes", ev.totalBytes);
+        resp.set("speedMBs", ev.speedMBs);
+        resp.set("progressPercent", ev.progressPercent);
+        resp.set("message", ev.message);
+        PostJsonToWebview(resp.serialize());
+    });
+
+    g_network->start();
+
+    // Register Win32 Window
+    WNDCLASSEXW wcex = { sizeof(WNDCLASSEXW) };
+    wcex.style = CS_HREDRAW | CS_VREDRAW;
+    wcex.lpfnWndProc = WndProc;
+    wcex.hInstance = hInstance;
+    wcex.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
+    wcex.hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+    wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wcex.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    wcex.lpszClassName = L"BlackHoleWindowClass";
+    RegisterClassExW(&wcex);
+
+    // Create Main Window
+    g_hWnd = CreateWindowW(
+        L"BlackHoleWindowClass",
+        L"BlackHole - Zero-Knowledge Native P2P",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, 1020, 720,
+        nullptr, nullptr, hInstance, nullptr
+    );
+
+    if (!g_hWnd) {
+        if (hMutex) CloseHandle(hMutex);
+        return FALSE;
+    }
+
+    // Explicitly set taskbar and title bar icons and full Unicode title
+    SendMessage(g_hWnd, WM_SETICON, ICON_BIG, (LPARAM)wcex.hIcon);
+    SendMessage(g_hWnd, WM_SETICON, ICON_SMALL, (LPARAM)wcex.hIconSm);
+    SetWindowTextW(g_hWnd, L"BlackHole - Zero-Knowledge Native P2P");
+
+    // Enable Immersive Dark Mode in Windows Title Bar
+    BOOL darkMode = TRUE;
+    DwmSetWindowAttribute(g_hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
+
+    ShowWindow(g_hWnd, SW_SHOWNORMAL);
+    UpdateWindow(g_hWnd);
+
+    // Ensure LocalAppData\BlackHole\WebView2 exists for browser state
+    PWSTR localAppData = nullptr;
+    std::wstring webViewDataDir = L"";
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &localAppData))) {
+        std::wstring appDataDir = std::wstring(localAppData) + L"\\BlackHole";
+        webViewDataDir = appDataDir + L"\\WebView2";
+        CreateDirectoryW(appDataDir.c_str(), NULL);
+        CreateDirectoryW(webViewDataDir.c_str(), NULL);
+        CoTaskMemFree(localAppData);
+    }
+
+    // Initialize WebView2 with automatic session fallback
+    InitializeWebView(g_hWnd, webViewDataDir);
 
     // Message Loop
     MSG msg;
@@ -539,6 +588,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     if (g_network) {
         g_network->stop();
+    }
+
+    if (hMutex) {
+        CloseHandle(hMutex);
     }
 
     CoUninitialize();
