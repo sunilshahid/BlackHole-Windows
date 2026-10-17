@@ -1102,21 +1102,36 @@ if (window.chrome && window.chrome.webview) {
       if (ev.eventType === 'progress') {
         if (!hasShownOverlay) {
           hasShownOverlay = true;
-          showTransferOverlay('Transferring Files...', ev.peerAlias || ev.peerIp);
+          const modalTitle = ev.peerAlias && ev.peerAlias.includes('Receiving') 
+            ? 'Receiving Files...' 
+            : ev.peerAlias && ev.peerAlias.includes('Sending') 
+            ? 'Sending Files...' 
+            : 'Transferring Files...';
+          showTransferOverlay(modalTitle, ev.peerAlias || ev.peerIp);
           updateModeBadge('lan', `${ev.peerIp}:53317`);
         }
         document.getElementById('transfer-modal-file').innerText = ev.currentFileName || '';
-        document.getElementById('transfer-fill').style.width = (ev.progressPercent || 0) + '%';
-        document.getElementById('transfer-percent').innerText = (ev.progressPercent || 0) + '%';
+        const pct = ev.progressPercent || 0;
+        document.getElementById('transfer-fill').style.width = pct + '%';
+        document.getElementById('transfer-percent').innerText = pct + '%';
         document.getElementById('transfer-speed').innerText = (ev.speedMBs || 0).toFixed(1) + ' MB/s';
+
+        // Calculate and display ETA
+        const remainingBytes = (ev.totalBytes || 0) - (ev.bytesTransferred || 0);
+        const speedBytes = (ev.speedMBs || 0) * 1024 * 1024;
+        const etaSec = (speedBytes > 0 && remainingBytes > 0) ? Math.ceil(remainingBytes / speedBytes) : 0;
+        document.getElementById('transfer-eta').innerText = formatTime(etaSec);
+
         document.getElementById('transfer-bytes').innerText = 
           formatBytes(ev.bytesTransferred) + ' / ' + formatBytes(ev.totalBytes);
       } else if (ev.eventType === 'complete') {
         onTransferCompleted(ev.peerAlias || ev.peerIp);
       } else if (ev.eventType === 'error') {
-        alert(ev.message || 'Transfer failed.');
         document.getElementById('transfer-overlay').classList.remove('active');
         hasShownOverlay = false;
+        if (ev.message && !ev.message.includes('cancelled')) {
+          alert(ev.message || 'Transfer failed.');
+        }
       }
     }
   });

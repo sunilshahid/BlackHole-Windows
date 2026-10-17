@@ -760,8 +760,27 @@ void NetworkEngine::handleHttpRequest(uintptr_t clientSockRaw, const std::string
         return;
     }
 
+    // 2b. Device status and alias
+    if (method == "GET" && path == "/api/info") {
+        std::string myAlias;
+        {
+            std::lock_guard<std::mutex> lock(settingsMutex);
+            myAlias = settings.alias;
+        }
+        JsonValue info = JsonValue::Object();
+        info.set("alias", myAlias);
+        info.set("version", "2.0.0");
+        info.set("status", "online");
+        std::string jsonStr = info.serialize();
+        std::string resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(jsonStr.size()) + "\r\nConnection: close\r\n\r\n" + jsonStr;
+        send(sock, resp.c_str(), static_cast<int>(resp.size()), 0);
+        closesocket(sock);
+        return;
+    }
+
     // 3. Download a shared file from PC to phone
     if (method == "GET" && path == "/api/download") {
+        cancelCurrentTransfer = false;
         int targetId = -1;
         auto idPos = query.find("id=");
         if (idPos != std::string::npos) {
@@ -781,7 +800,7 @@ void NetworkEngine::handleHttpRequest(uintptr_t clientSockRaw, const std::string
                 std::vector<char> fbuf(64 * 1024);
                 int64_t sent = 0;
                 auto startT = std::chrono::steady_clock::now();
-                while (inFile.good() && sent < fileSize) {
+                while (inFile.good() && sent < fileSize && !cancelCurrentTransfer && isRunning) {
                     inFile.read(fbuf.data(), fbuf.size());
                     std::streamsize bytesRead = inFile.gcount();
                     if (bytesRead <= 0) break;
@@ -797,7 +816,7 @@ void NetworkEngine::handleHttpRequest(uintptr_t clientSockRaw, const std::string
                     TransferEvent prog;
                     prog.type = "progress";
                     prog.peerIp = clientIp;
-                    prog.peerAlias = "Mobile Browser";
+                    prog.peerAlias = "Sending to Mobile";
                     prog.currentFileName = fileName;
                     prog.bytesTransferred = sent;
                     prog.totalBytes = fileSize;
@@ -807,15 +826,28 @@ void NetworkEngine::handleHttpRequest(uintptr_t clientSockRaw, const std::string
                 }
                 inFile.close();
 
-                TransferEvent done;
-                done.type = "complete";
-                done.peerIp = clientIp;
-                done.peerAlias = "Mobile Browser";
-                done.currentFileName = fileName;
-                done.totalBytes = fileSize;
-                done.progressPercent = 100;
-                done.message = "Downloaded by phone: " + fileName;
-                if (onTransferEvent) onTransferEvent(done);
+                if (cancelCurrentTransfer) {
+                    TransferEvent ev;
+                    ev.type = "error";
+                    ev.peerIp = clientIp;
+                    ev.peerAlias = "Sending to Mobile";
+                    ev.message = "Download cancelled by user.";
+                    if (onTransferEvent) onTransferEvent(ev);
+                    closesocket(sock);
+                    return;
+                }
+
+                if (sent >= fileSize) {
+                    TransferEvent done;
+                    done.type = "complete";
+                    done.peerIp = clientIp;
+                    done.peerAlias = "Sending to Mobile";
+                    done.currentFileName = fileName;
+                    done.totalBytes = fileSize;
+                    done.progressPercent = 100;
+                    done.message = "Downloaded by phone: " + fileName;
+                    if (onTransferEvent) onTransferEvent(done);
+                }
 
                 closesocket(sock);
                 return;
@@ -829,6 +861,7 @@ void NetworkEngine::handleHttpRequest(uintptr_t clientSockRaw, const std::string
 
     // 4. Upload file from phone to PC
     if (method == "POST" && path == "/api/upload") {
+        cancelCurrentTransfer = false;
         int64_t contentLength = 0;
         if (headers.count("content-length")) {
             contentLength = std::atoll(headers["content-length"].c_str());
@@ -858,7 +891,7 @@ void NetworkEngine::handleHttpRequest(uintptr_t clientSockRaw, const std::string
         }
 
         std::vector<char> upBuf(64 * 1024);
-        while (totalReceived < contentLength || contentLength == 0) {
+        while ((totalReceived < contentLength || contentLength == 0) && !cancelCurrentTransfer && isRunning) {
             int r = recv(sock, upBuf.data(), static_cast<int>(upBuf.size()), 0);
             if (r <= 0) break;
             outFile.write(upBuf.data(), r);
@@ -872,7 +905,7 @@ void NetworkEngine::handleHttpRequest(uintptr_t clientSockRaw, const std::string
             TransferEvent prog;
             prog.type = "progress";
             prog.peerIp = clientIp;
-            prog.peerAlias = "Mobile Device";
+            prog.peerAlias = "Receiving from Mobile";
             prog.currentFileName = fileName;
             prog.bytesTransferred = totalReceived;
             prog.totalBytes = contentLength;
@@ -882,10 +915,36 @@ void NetworkEngine::handleHttpRequest(uintptr_t clientSockRaw, const std::string
         }
         outFile.close();
 
+        if (cancelCurrentTransfer) {
+            std::error_code ec;
+            std::filesystem::remove(outFilePath, ec);
+            TransferEvent ev;
+            ev.type = "error";
+            ev.peerIp = clientIp;
+            ev.peerAlias = "Receiving from Mobile";
+            ev.message = "Upload cancelled by user.";
+            if (onTransferEvent) onTransferEvent(ev);
+            closesocket(sock);
+            return;
+        }
+
+        if (contentLength > 0 && totalReceived < contentLength) {
+            std::error_code ec;
+            std::filesystem::remove(outFilePath, ec);
+            TransferEvent ev;
+            ev.type = "error";
+            ev.peerIp = clientIp;
+            ev.peerAlias = "Receiving from Mobile";
+            ev.message = "Upload interrupted or cancelled by client.";
+            if (onTransferEvent) onTransferEvent(ev);
+            closesocket(sock);
+            return;
+        }
+
         TransferEvent done;
         done.type = "complete";
         done.peerIp = clientIp;
-        done.peerAlias = "Mobile Device";
+        done.peerAlias = "Receiving from Mobile";
         done.currentFileName = fileName;
         done.totalBytes = totalReceived;
         done.progressPercent = 100;
