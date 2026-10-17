@@ -1189,8 +1189,21 @@ if (window.chrome && window.chrome.webview) {
   });
 }
 
-// Request Initial Data on Load
+// Request Initial Data on Load & Setup UI handlers
 window.addEventListener('DOMContentLoaded', () => {
   sendToCpp('get_init_data');
   renderSelectedFiles();
+
+  // Smooth mouse-wheel horizontal scrolling for top action cards row
+  const actionsRow = document.querySelector('.receive-actions-row');
+  if (actionsRow) {
+    actionsRow.addEventListener('wheel', (e) => {
+      if (actionsRow.scrollWidth > actionsRow.clientWidth) {
+        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+          e.preventDefault();
+          actionsRow.scrollLeft += e.deltaY;
+        }
+      }
+    }, { passive: false });
+  }
 });
