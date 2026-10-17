@@ -36,14 +36,23 @@ static ComPtr<ICoreWebView2> g_webview;
 static std::unique_ptr<BlackHole::NetworkEngine> g_network;
 static BlackHole::AppSettings g_settings;
 
-// Helper to post JSON string to WebView2 UI
+#define WM_APP_POST_JSON (WM_APP + 101)
+
+static std::mutex g_postMsgMutex;
+static std::vector<std::wstring> g_pendingJsonMessages;
+
+// Thread-safe helper to post JSON string to WebView2 UI
 static void PostJsonToWebview(const std::string& jsonStr) {
-    if (g_webview) {
-        int wlen = MultiByteToWideChar(CP_UTF8, 0, jsonStr.c_str(), -1, NULL, 0);
-        std::wstring wstr(wlen, 0);
-        MultiByteToWideChar(CP_UTF8, 0, jsonStr.c_str(), -1, &wstr[0], wlen);
-        g_webview->PostWebMessageAsJson(wstr.c_str());
+    if (!g_hWnd) return;
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, jsonStr.c_str(), -1, NULL, 0);
+    std::wstring wstr(wlen, 0);
+    MultiByteToWideChar(CP_UTF8, 0, jsonStr.c_str(), -1, &wstr[0], wlen);
+
+    {
+        std::lock_guard<std::mutex> lock(g_postMsgMutex);
+        g_pendingJsonMessages.push_back(std::move(wstr));
     }
+    PostMessageW(g_hWnd, WM_APP_POST_JSON, 0, 0);
 }
 
 // Convert wide string to utf8
@@ -281,6 +290,21 @@ static void HandleWebMessage(const std::string& msgJson) {
             ShellExecuteA(NULL, "open", url.c_str(), NULL, NULL, SW_SHOW);
         }
     }
+    else if (action == "rescan_peers") {
+        BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
+        resp.set("type", "peers_updated");
+        BlackHole::JsonValue peers = BlackHole::JsonValue::Array();
+        for (auto const& p : g_network->getPeers()) {
+            BlackHole::JsonValue pObj = BlackHole::JsonValue::Object();
+            pObj.set("ip", p.ip);
+            pObj.set("port", p.port);
+            pObj.set("alias", p.alias);
+            pObj.set("deviceType", p.deviceType);
+            peers.push(pObj);
+        }
+        resp.set("peers", peers);
+        PostJsonToWebview(resp.serialize());
+    }
 }
 
 // Window Procedure
@@ -293,6 +317,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             g_controller->put_Bounds(bounds);
         }
         break;
+    case WM_APP_POST_JSON: {
+        std::vector<std::wstring> msgs;
+        {
+            std::lock_guard<std::mutex> lock(g_postMsgMutex);
+            msgs.swap(g_pendingJsonMessages);
+        }
+        if (g_webview) {
+            for (const auto& wstr : msgs) {
+                g_webview->PostWebMessageAsJson(wstr.c_str());
+            }
+        }
+        break;
+    }
     case WM_DESTROY:
         PostQuitMessage(0);
         break;

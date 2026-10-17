@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BlackHole - Native P2P</title>
+  <title>BlackHole - Zero-Knowledge Native P2P</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="app-layout">
-    <!-- Left Navigation Rail / Sidebar (LocalSend Inspired) -->
+    <!-- Left Navigation Rail / Sidebar -->
     <aside class="sidebar">
       <div class="sidebar-brand">
         <img src="logo.svg" alt="BlackHole" class="brand-logo">
@@ -54,20 +54,18 @@
       <input type="file" id="file-picker" multiple style="display: none;">
 
       <!-- ============================================== -->
-      <!-- TAB 1: SEND -->
+      <!-- TAB 1: SEND (LocalSend Inspired, Uncluttered) -->
       <!-- ============================================== -->
       <section id="tab-send" class="tab-pane active">
-        <!-- 1. Selection Section (LocalSend Style Tiles) -->
+        <!-- 1. Selection Section -->
         <div class="section-group">
           <div class="section-header">
             <h2 class="section-title">Selection</h2>
-            <div id="selection-summary-badge" class="selection-pill" style="display: none;">
-              <span id="selection-count-text">0 files</span>
-            </div>
           </div>
 
-          <div class="selection-grid">
-            <button class="tile-btn" id="tile-file" title="Select files to send">
+          <!-- Empty State: 4 Action Tiles -->
+          <div class="selection-grid" id="selection-grid-empty">
+            <button class="tile-btn" id="tile-file" title="Select files">
               <div class="tile-icon-box cyan-tint">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
@@ -76,7 +74,7 @@
               <span class="tile-label">File</span>
             </button>
 
-            <button class="tile-btn" id="tile-folder" title="Select an entire folder to send">
+            <button class="tile-btn" id="tile-folder" title="Select folder">
               <div class="tile-icon-box purple-tint">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 8 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>
@@ -85,181 +83,83 @@
               <span class="tile-label">Folder</span>
             </button>
 
-            <button class="tile-btn" id="tile-paste" title="Paste text or files from clipboard">
+            <button class="tile-btn" id="tile-text" title="Share text note">
               <div class="tile-icon-box pink-tint">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="17" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="17" y1="18" x2="3" y2="18"/>
+                </svg>
+              </div>
+              <span class="tile-label">Text</span>
+            </button>
+
+            <button class="tile-btn" id="tile-paste" title="Paste from clipboard">
+              <div class="tile-icon-box emerald-tint">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
                 </svg>
               </div>
               <span class="tile-label">Paste</span>
             </button>
+          </div>
 
-            <button class="tile-btn danger-tint" id="tile-clear" title="Clear all selected files" style="display: none;">
-              <div class="tile-icon-box red-tint">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                </svg>
+          <!-- Active State: Compact Selection Summary Card (LocalSend Style) -->
+          <div class="compact-selection-card" id="selection-card-active" style="display: none;">
+            <div class="selection-card-top">
+              <div>
+                <div class="selection-count-line" id="compact-files-count">Files: 1</div>
+                <div class="selection-size-line" id="compact-files-size">Size: 12.4 MB</div>
               </div>
-              <span class="tile-label">Clear</span>
-            </button>
-          </div>
-
-          <!-- Dropzone area -->
-          <div class="dropzone" id="dropzone">
-            <svg class="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/>
-              <line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
-            <div class="dropzone-text">Click or drop files here to add them to selection</div>
-            <div class="dropzone-sub">Files are automatically served to nearby phones and ready for stream</div>
-          </div>
-
-          <!-- Selected Files List Container -->
-          <div class="file-list-card" id="selected-files-container" style="display: none;">
-            <div class="file-list-header">
-              <span id="selected-files-summary">0 files selected (0 B)</span>
-              <button class="btn-text-danger" id="btn-clear-selection">Clear All</button>
+              <button class="btn-icon-danger" id="btn-compact-clear" title="Clear selection">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
             </div>
-            <div class="file-list-items" id="selected-files-list"></div>
+
+            <!-- Preview icons / mini pills -->
+            <div class="compact-files-preview" id="compact-files-preview"></div>
+
+            <div class="selection-card-bottom">
+              <span class="staged-sync-tag" id="compact-sync-status">⚡ Staged for offline hotspot link</span>
+              <div class="selection-card-actions">
+                <button class="btn-pill-subtle" id="btn-compact-edit">View List</button>
+                <button class="btn-pill-action" id="btn-compact-add">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Add
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- 2. Sharing Modes Section -->
+        <!-- 2. Nearby Devices (With Action Icons Header) -->
         <div class="section-group">
           <div class="section-header">
-            <h2 class="section-title">Nearby &amp; Sharing Destinations</h2>
-          </div>
-
-          <!-- Destination 1: Bidirectional Local Web Share (Offline Hotspot Mode) -->
-          <div class="card highlight-card">
-            <div class="card-top">
-              <div class="card-title-group">
-                <div class="mode-badge-green">
-                  <span class="status-dot"></span>
-                  Offline Hotspot Server Active
-                </div>
-                <h3 class="card-heading">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
-                  Local Web Share (No Internet &amp; No App Needed)
-                </h3>
-              </div>
-              <button class="btn-sm-secondary" id="btn-toggle-local-qr">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 7h.01"/><path d="M17 7h.01"/><path d="M7 17h.01"/><path d="M17 17h.01"/></svg>
-                <span id="btn-toggle-local-qr-text">Show QR</span>
+            <h2 class="section-title">Nearby devices</h2>
+            <!-- Clean Header Action Icons (LocalSend Parity) -->
+            <div class="header-action-icons">
+              <button class="action-circle-btn" id="btn-rescan-peers" title="Rescan network">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              </button>
+              <button class="action-circle-btn" id="btn-open-manual-send" title="Manual sending (Send to IP)">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/></svg>
+              </button>
+              <button class="action-circle-btn" id="btn-open-share-link" title="Share via link (Offline Hotspot Portal)">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              </button>
+              <button class="action-circle-btn" id="btn-open-remote-share" title="Remote Share (Room Code)">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
               </button>
             </div>
-
-            <p class="card-desc">
-              Any smartphone or laptop on this Wi-Fi / Hotspot can open this local portal in their browser. 
-              <strong>Bidirectional:</strong> They can download files you selected above, or upload files from their phone directly to this PC!
-            </p>
-
-            <div class="link-banner">
-              <div class="link-url" id="local-server-url">http://127.0.0.1:53317</div>
-              <div class="link-actions">
-                <button class="btn-action" id="btn-copy-local-link" title="Copy Local URL">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
-                  Copy Link
-                </button>
-                <button class="btn-action" id="btn-open-local-browser" title="Open in Browser">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                  Open Portal
-                </button>
-              </div>
-            </div>
-
-            <!-- Collapsible Local QR Box -->
-            <div id="local-qr-box" class="qr-reveal-box" style="display: none;">
-              <div class="qr-card">
-                <div id="local-qrcode-container"></div>
-              </div>
-              <div class="qr-hint">Scan with any phone camera on the same Wi-Fi/Hotspot to connect instantly</div>
-            </div>
-
-            <div class="card-footer-info">
-              <span class="status-tag" id="shared-files-status">0 files currently staged for phone download</span>
-            </div>
           </div>
 
-          <!-- Destination 2: WebRTC Remote Share (Internet / Room Code) -->
-          <div class="card">
-            <div class="card-top">
-              <div class="card-title-group">
-                <div class="mode-badge-purple">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-                  Internet WebRTC Share
-                </div>
-                <h3 class="card-heading">Remote Share (share.sunilshahid.com)</h3>
+          <!-- Peer Radar Container -->
+          <div class="peer-area" id="peer-grid">
+            <div class="radar-empty-state">
+              <div class="radar-scan-ring">
+                <span class="radar-scan-dot"></span>
               </div>
-            </div>
-
-            <p class="card-desc">
-              For recipients NOT on your local Wi-Fi. Recipient opens <code>share.sunilshahid.com</code> on mobile or desktop and enters your 6-digit room code.
-            </p>
-
-            <div id="web-share-idle" class="share-idle-row">
-              <button class="btn-primary-gradient" id="btn-start-web-share">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 7h.01"/><path d="M17 7h.01"/><path d="M7 17h.01"/><path d="M17 17h.01"/></svg>
-                Create Room Code &amp; QR
-              </button>
-              <span class="hint-muted">Generates a zero-knowledge 6-digit room</span>
-            </div>
-
-            <div id="web-share-active" class="web-share-container" style="display: none;">
-              <div class="room-code-tag">Recipient Enter This Code</div>
-              <div class="room-code-badge" id="share-code-display">000-000</div>
-
-              <div class="qr-card">
-                <div id="qrcode-container"></div>
-              </div>
-
-              <p class="share-url-mono" id="share-url-text">https://share.sunilshahid.com/?code=...</p>
-
-              <div class="share-btn-row">
-                <button class="btn-action" id="btn-copy-code">Copy Code</button>
-                <button class="btn-action" id="btn-copy-url">Copy Direct Link</button>
-                <button class="btn-action btn-danger-outline" id="btn-stop-web-share">Cancel Sharing</button>
-              </div>
-
-              <div class="share-status-line">
-                <span class="status-dot pulse-purple"></span>
-                <span id="web-share-status">Waiting for receiver to connect...</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Destination 3: Discovered Nearby Devices (Native Radar) -->
-          <div class="card">
-            <div class="card-top">
-              <div class="card-title-group">
-                <div class="mode-badge-blue">
-                  <span class="radar-dot"></span>
-                  Native UDP Radar
-                </div>
-                <h3 class="card-heading">Nearby BlackHole Devices</h3>
-              </div>
-              <span class="port-tag">Port 53317</span>
-            </div>
-
-            <p class="card-desc">
-              Automatic zero-configuration discovery for other PCs and Android phones running the native BlackHole app.
-            </p>
-
-            <div class="peer-grid" id="peer-grid">
-              <div class="no-peers">
-                <span class="spinner-dot"></span>
-                Scanning local network for BlackHole devices...
-              </div>
-            </div>
-
-            <!-- Manual Direct IP Send -->
-            <div class="direct-ip-box">
-              <div class="direct-ip-title">Direct IP Transfer (Cross-Subnet)</div>
-              <div class="direct-ip-inputs">
-                <input type="text" id="direct-ip" class="input-text" placeholder="e.g. 192.168.43.1">
-                <input type="number" id="direct-port" class="input-text port-input" value="53317">
-                <button class="btn-primary-gradient" id="btn-direct-send">Send to IP</button>
+              <div class="radar-empty-text">Scanning for nearby BlackHole devices on your Wi-Fi...</div>
+              <div class="radar-troubleshoot-link" id="link-radar-troubleshoot">
+                Please ensure the desired target is also on the same Wi-Fi network.
               </div>
             </div>
           </div>
@@ -267,89 +167,118 @@
       </section>
 
       <!-- ============================================== -->
-      <!-- TAB 2: RECEIVE -->
+      <!-- TAB 2: RECEIVE (Clean, Focused, Live Progress) -->
       <!-- ============================================== -->
       <section id="tab-receive" class="tab-pane">
-        <!-- Ready to Receive Hero Card -->
-        <div class="card hero-receive-card">
-          <div class="hero-receive-content">
-            <div class="hero-receive-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-              </svg>
-            </div>
-            <div>
-              <h2 class="hero-receive-title">Ready to Receive Files</h2>
-              <p class="hero-receive-sub">
-                This computer is discoverable as <strong id="receive-alias-label">BlackHole-PC</strong> on your local network.
-              </p>
-            </div>
+        <!-- Hero Header -->
+        <div class="receive-hero-header">
+          <div class="hero-radar-box">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
           </div>
-
-          <!-- Local Web Portal Card for Phones without the App -->
-          <div class="portal-info-box">
-            <div class="portal-info-header">
-              <div class="mode-badge-green">
-                <span class="status-dot"></span>
-                Mobile Upload &amp; Download Portal
-              </div>
-              <span class="portal-note">Works on offline hotspot without internet</span>
-            </div>
-            <p class="portal-desc">
-              Phones without the BlackHole app can open this link in any browser (Chrome/Safari) to upload photos, videos, and files directly to this PC:
-            </p>
-            <div class="link-banner">
-              <div class="link-url" id="receive-portal-url">http://127.0.0.1:53317</div>
-              <div class="link-actions">
-                <button class="btn-action" id="btn-receive-copy-portal">Copy Link</button>
-                <button class="btn-action" id="btn-receive-open-portal">Open Portal</button>
-              </div>
+          <div>
+            <h2 class="receive-alias-heading" id="receive-alias-label">DESKTOP-PC</h2>
+            <div class="receive-status-badge">
+              <span class="status-dot"></span>
+              <span id="receive-status-text">Ready to receive on port 53317</span>
             </div>
           </div>
         </div>
 
-        <!-- Receive from Web / Remote Room Code -->
-        <div class="card">
-          <div class="card-title-group" style="margin-bottom: 12px;">
-            <div class="mode-badge-purple">Remote WebRTC</div>
-            <h3 class="card-heading">Receive via 6-Digit Room Code</h3>
+        <!-- 3 Quick Action Cards / Entry Points -->
+        <div class="receive-actions-row">
+          <div class="receive-card-pill" id="card-receive-portal">
+            <div class="pill-icon-wrap emerald-tint">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            </div>
+            <div class="pill-info">
+              <div class="pill-title">Mobile Web Portal</div>
+              <div class="pill-sub" id="receive-portal-link-label">http://192.168.0.x:53317</div>
+            </div>
+            <button class="btn-pill-action" id="btn-receive-view-portal">Open</button>
           </div>
-          <p class="card-desc">
-            Enter the 6-digit room code shown on the sender's device (from phone, web browser, or another computer).
-          </p>
 
-          <div class="room-code-input-row">
-            <input type="text" id="input-receive-code" class="code-input-field" placeholder="000-000" maxlength="7">
-            <button class="btn-primary-gradient" id="btn-connect-code">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              Connect &amp; Receive
+          <div class="receive-card-pill" id="card-receive-code">
+            <div class="pill-icon-wrap purple-tint">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            </div>
+            <div class="pill-info">
+              <div class="pill-title">Room Code</div>
+              <div class="pill-sub">Connect via 6-digit code</div>
+            </div>
+            <button class="btn-pill-subtle" id="btn-open-code-modal">Enter Code</button>
+          </div>
+
+          <div class="receive-card-pill" id="card-receive-dest">
+            <div class="pill-icon-wrap cyan-tint">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 8 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+            </div>
+            <div class="pill-info">
+              <div class="pill-title">Save Location</div>
+              <div class="pill-sub truncate-path" id="receive-folder-display">Downloads\BlackHole</div>
+            </div>
+            <button class="btn-pill-subtle" id="btn-open-download-dir">Open</button>
+          </div>
+        </div>
+
+        <!-- LIVE RECEIVING / IN-PROGRESS TRANSFER CARD (Directly on screen!) -->
+        <div class="live-transfer-panel" id="receive-live-panel" style="display: none;">
+          <div class="transfer-panel-top">
+            <div class="transfer-info-left">
+              <div class="pulse-icon-box">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              </div>
+              <div>
+                <h3 class="transfer-headline" id="receive-live-title">Receiving File...</h3>
+                <p class="transfer-subline" id="receive-live-file">photo_123.jpg</p>
+              </div>
+            </div>
+            <button class="btn-cancel-transfer" id="btn-receive-cancel-transfer">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              Cancel
             </button>
           </div>
 
-          <div id="receive-status-msg" class="receive-status-line" style="display: none;">
-            Connecting...
+          <div class="transfer-metric-line">
+            <span class="live-big-pct" id="receive-live-pct">0%</span>
+            <span class="live-byte-count" id="receive-live-bytes">0 B / 0 B</span>
           </div>
-        </div>
 
-        <!-- Download Folder Box -->
-        <div class="card">
-          <div class="card-top">
-            <div class="card-title-group">
-              <h3 class="card-heading">Save Location</h3>
+          <div class="meter-rail">
+            <div class="meter-bar" id="receive-live-fill"></div>
+          </div>
+
+          <div class="stats-2col">
+            <div class="stat-pill">
+              <div class="stat-pill-icon cyan">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 12-4-4v3H3v2h15v3l4-4Z"/></svg>
+              </div>
+              <div class="stat-meta">
+                <span class="stat-lbl">Transfer Speed</span>
+                <span class="stat-val" id="receive-live-speed">0.0 MB/s</span>
+              </div>
             </div>
-            <button class="btn-sm-secondary" id="btn-open-download-dir">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 8 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
-              Open Folder
-            </button>
+
+            <div class="stat-pill">
+              <div class="stat-pill-icon purple">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+              </div>
+              <div class="stat-meta">
+                <span class="stat-lbl">Remaining</span>
+                <span class="stat-val" id="receive-live-eta">--</span>
+              </div>
+            </div>
           </div>
-          <p class="folder-path-display" id="receive-folder-display">C:\Users\Downloads</p>
         </div>
 
-        <!-- Recent Transfers History -->
-        <div class="card">
-          <div class="card-heading" style="margin-bottom: 14px;">Recent Transfers</div>
-          <div id="transfer-history" class="history-list">
-            <div class="no-history">No recent file transfers yet.</div>
+        <!-- Recent Transfers Section -->
+        <div class="section-group" style="margin-top: 18px;">
+          <div class="section-header">
+            <h2 class="section-title">Recent Transfers</h2>
+          </div>
+          <div class="history-container" id="transfer-history">
+            <div class="no-history-text">No recent file transfers yet.</div>
           </div>
         </div>
       </section>
@@ -360,9 +289,7 @@
       <section id="tab-settings" class="tab-pane">
         <div class="card">
           <div class="card-top" style="margin-bottom: 20px;">
-            <div class="card-title-group">
-              <h3 class="card-heading">Device &amp; Transfer Settings</h3>
-            </div>
+            <h3 class="card-heading">Settings</h3>
           </div>
 
           <!-- Device Alias -->
@@ -388,11 +315,11 @@
             </div>
           </div>
 
-          <!-- Quick Save (LocalSend Parity) -->
+          <!-- Quick Save -->
           <div class="setting-row">
             <div class="setting-text">
               <div class="setting-name">Quick Save (Auto-Accept)</div>
-              <div class="setting-sub">Automatically accept and save incoming files from nearby devices</div>
+              <div class="setting-sub">Automatically accept and save incoming files without prompt</div>
             </div>
             <label class="switch-toggle">
               <input type="checkbox" id="setting-quick-save" checked>
@@ -400,11 +327,11 @@
             </label>
           </div>
 
-          <!-- Transfer Port -->
+          <!-- Port -->
           <div class="setting-row">
             <div class="setting-text">
-              <div class="setting-name">Transfer &amp; Discovery Port</div>
-              <div class="setting-sub">Default port 53317 (compatible with LocalSend offline network discovery)</div>
+              <div class="setting-name">Port</div>
+              <div class="setting-sub">Default port 53317</div>
             </div>
             <div class="setting-input-wrapper">
               <input type="number" id="setting-port" class="input-text port-input" value="53317">
@@ -415,7 +342,7 @@
           <div class="setting-row">
             <div class="setting-text">
               <div class="setting-name">End-to-End Encryption (AES-256-GCM)</div>
-              <div class="setting-sub">Hardware accelerated encryption. Can be toggled off for maximum raw LAN throughput</div>
+              <div class="setting-sub">Hardware accelerated encryption</div>
             </div>
             <label class="switch-toggle">
               <input type="checkbox" id="setting-encryption" checked>
@@ -427,88 +354,148 @@
             <button class="btn-primary-gradient" id="btn-save-settings">Save Settings</button>
           </div>
         </div>
-
-        <!-- About BlackHole Card -->
-        <div class="card about-card">
-          <div class="about-header">
-            <img src="logo.svg" alt="BlackHole" class="about-logo">
-            <div>
-              <div class="about-name">BlackHole for Windows</div>
-              <div class="about-sub">Version 2.0.0 • Zero-Knowledge Universal P2P Ecosystem</div>
-            </div>
-          </div>
-          <p class="about-desc">
-            Seamless file sharing across Web (<code>share.sunilshahid.com</code>), Android, and Windows. 
-            Native C++ Winsock core with embedded HTTP server and WebRTC data channels.
-          </p>
-        </div>
       </section>
     </main>
   </div>
 
   <!-- ============================================== -->
-  <!-- TRANSFER PROGRESS OVERLAY (High-Precision Modal) -->
+  <!-- MODAL 1: MANUAL SENDING (Target 🎯 Dialog) -->
   <!-- ============================================== -->
-  <div class="transfer-overlay" id="transfer-overlay">
-    <div class="transfer-modal">
-      <div class="modal-header">
-        <div class="modal-brand">
-          <img src="logo.svg" alt="BlackHole" class="modal-logo">
-          <div>
-            <h3 id="transfer-modal-title">Transferring Files...</h3>
-            <p id="transfer-modal-file">Preparing stream...</p>
-          </div>
+  <div class="modal-overlay" id="modal-manual-send">
+    <div class="popup-box">
+      <div class="popup-header">
+        <h3 class="popup-title">Enter address</h3>
+        <button class="popup-close-btn" onclick="closeModal('modal-manual-send')">✕</button>
+      </div>
+
+      <div class="popup-tabs">
+        <button class="popup-tab active">IP Address</button>
+      </div>
+
+      <div class="popup-body">
+        <label class="input-label">Target IP &amp; Port</label>
+        <div class="input-row-combined">
+          <input type="text" id="manual-ip-input" class="popup-input" placeholder="192.168.0.x">
+          <input type="number" id="manual-port-input" class="popup-input port-box" value="53317">
         </div>
-        <div id="transfer-mode-badge" class="connection-pill pill-lan">
-          <span class="status-dot"></span>
-          <span id="route-label">Direct LAN Wire Speed</span>
+        <p class="popup-hint">Example: 192.168.0.105 (port 53317)</p>
+      </div>
+
+      <div class="popup-footer">
+        <button class="btn-popup-cancel" onclick="closeModal('modal-manual-send')">Cancel</button>
+        <button class="btn-popup-confirm" id="btn-confirm-manual-send">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- MODAL 2: SHARE VIA LINK (Local Web Portal 🔗) -->
+  <!-- ============================================== -->
+  <div class="modal-overlay" id="modal-share-link">
+    <div class="popup-box wide-box">
+      <div class="popup-header">
+        <div>
+          <h3 class="popup-title">Share via Link</h3>
+          <p class="popup-sub">Offline Hotspot &amp; Local Wi-Fi Portal (Zero Data Used)</p>
+        </div>
+        <button class="popup-close-btn" onclick="closeModal('modal-share-link')">✕</button>
+      </div>
+
+      <div class="popup-body text-center">
+        <div class="qr-container-box">
+          <div id="local-modal-qrcode"></div>
+        </div>
+        <div class="link-display-pill" id="modal-local-url-text">http://192.168.0.x:53317</div>
+        <p class="popup-hint">Any smartphone on this Wi-Fi can open this link to download selected files or upload files to this PC.</p>
+      </div>
+
+      <div class="popup-footer space-between">
+        <button class="btn-popup-secondary" id="btn-modal-open-browser">Open in Browser</button>
+        <div class="flex-gap">
+          <button class="btn-popup-confirm" id="btn-modal-copy-link">Copy Link</button>
+          <button class="btn-popup-cancel" onclick="closeModal('modal-share-link')">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- MODAL 3: REMOTE WEBRTC SHARE (Room Code 🌐) -->
+  <!-- ============================================== -->
+  <div class="modal-overlay" id="modal-remote-share">
+    <div class="popup-box wide-box">
+      <div class="popup-header">
+        <div>
+          <h3 class="popup-title">Internet Share</h3>
+          <p class="popup-sub">Zero-knowledge 6-digit room code for remote recipients</p>
+        </div>
+        <button class="popup-close-btn" onclick="closeModal('modal-remote-share')">✕</button>
+      </div>
+
+      <div class="popup-body text-center">
+        <div id="remote-share-idle-view">
+          <p class="popup-hint" style="margin-bottom: 16px;">Generate a secure, encrypted peer-to-peer room via <code>share.sunilshahid.com</code>.</p>
+          <button class="btn-primary-gradient" id="btn-modal-start-room">Create Room Code &amp; QR</button>
+        </div>
+
+        <div id="remote-share-active-view" style="display: none;">
+          <div class="room-code-tag">Recipient Enter This Code</div>
+          <div class="room-code-badge" id="modal-room-code-display">000-000</div>
+          <div class="qr-container-box">
+            <div id="remote-modal-qrcode"></div>
+          </div>
+          <div class="link-display-pill" id="modal-room-url-text">https://share.sunilshahid.com/?code=...</div>
+          <p class="popup-hint" id="modal-room-status">Waiting for recipient to connect...</p>
         </div>
       </div>
 
-      <div class="route-details" id="route-details" style="display: none;">
-        <span id="route-endpoints">192.168.1.5 ⇄ 192.168.1.20</span>
-        <span class="route-sub" id="route-sub">• Zero Internet Used</span>
+      <div class="popup-footer flex-end">
+        <button class="btn-popup-confirm" id="btn-modal-copy-room-link">Copy Direct Link</button>
+        <button class="btn-popup-cancel" onclick="closeModal('modal-remote-share')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- MODAL 4: ENTER ROOM CODE (RECEIVER) -->
+  <!-- ============================================== -->
+  <div class="modal-overlay" id="modal-receive-code">
+    <div class="popup-box">
+      <div class="popup-header">
+        <h3 class="popup-title">Receive via Room Code</h3>
+        <button class="popup-close-btn" onclick="closeModal('modal-receive-code')">✕</button>
       </div>
 
-      <!-- Main Percentage & Transferred Counter -->
-      <div class="transfer-main-metric">
-        <span class="big-percent" id="transfer-percent">0%</span>
-        <span class="bytes-counter" id="transfer-bytes">0 B / 0 B</span>
+      <div class="popup-body text-center">
+        <p class="popup-hint" style="margin-bottom: 14px;">Enter the 6-digit code shown on the sender's device:</p>
+        <input type="text" id="modal-input-receive-code" class="code-big-input" placeholder="000-000" maxlength="7">
+        <p class="popup-hint" id="modal-receive-code-status" style="display: none; margin-top: 10px;">Connecting...</p>
       </div>
 
-      <!-- High-Precision Gradient Progress Bar -->
-      <div class="transfer-meter">
-        <div class="transfer-fill" id="transfer-fill"></div>
+      <div class="popup-footer">
+        <button class="btn-popup-cancel" onclick="closeModal('modal-receive-code')">Cancel</button>
+        <button class="btn-popup-confirm" id="btn-modal-confirm-receive">Connect &amp; Receive</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- MODAL 5: DETAILED FILE LIST MODAL -->
+  <!-- ============================================== -->
+  <div class="modal-overlay" id="modal-file-list">
+    <div class="popup-box">
+      <div class="popup-header">
+        <h3 class="popup-title">Selected Files</h3>
+        <button class="popup-close-btn" onclick="closeModal('modal-file-list')">✕</button>
       </div>
 
-      <!-- 2-Column Stats Grid -->
-      <div class="transfer-stats-grid">
-        <div class="stat-card">
-          <div class="stat-icon purple-tint">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 12-4-4v3H3v2h15v3l4-4Z"/></svg>
-          </div>
-          <div class="stat-info">
-            <span class="stat-label">Transfer Speed</span>
-            <span class="stat-val" id="transfer-speed">0.0 MB/s</span>
-          </div>
-        </div>
-
-        <div class="stat-card">
-          <div class="stat-icon cyan-tint">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
-          </div>
-          <div class="stat-info">
-            <span class="stat-label">Time Remaining</span>
-            <span class="stat-val" id="transfer-eta">--</span>
-          </div>
-        </div>
+      <div class="popup-body">
+        <div class="file-list-items" id="modal-file-list-items"></div>
       </div>
 
-      <div class="modal-footer">
-        <button class="btn-cancel" id="btn-cancel-transfer">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          Cancel Transfer
-        </button>
+      <div class="popup-footer space-between">
+        <button class="btn-text-danger" onclick="clearAllFiles(); closeModal('modal-file-list');">Clear All</button>
+        <button class="btn-popup-confirm" onclick="closeModal('modal-file-list')">Done</button>
       </div>
     </div>
   </div>

@@ -1,5 +1,5 @@
 // BlackHole Windows Native Client UI Logic
-// Integrates Native Winsock UDP/TCP Radar + Zero-Knowledge WebRTC Room Code Sharing
+// Uncluttered LocalSend UX + Cosmic Theme + Live In-App Receiving Display
 
 const SIGNALING_WS_URL = 'wss://share.sunilshahid.com/ws';
 
@@ -29,8 +29,34 @@ let webrtcReceiverManager = null;
 let receiverEngine = null;
 let isReceiverTransferring = false;
 
-// Overlay State Flag to prevent flickering
-let hasShownOverlay = false;
+// QR Code Instances
+let localQrInstance = null;
+let remoteQrInstance = null;
+let livePanelHideTimeout = null;
+
+// ========================================================
+// 🪟 GLOBAL MODAL CONTROLLERS
+// ========================================================
+window.openModal = function(id) {
+  const modal = document.getElementById(id);
+  if (modal) {
+    modal.classList.add('active');
+  }
+};
+
+window.closeModal = function(id) {
+  const modal = document.getElementById(id);
+  if (modal) {
+    modal.classList.remove('active');
+  }
+};
+
+// Close modal when clicking outside box
+document.addEventListener('click', (e) => {
+  if (e.target.classList && e.target.classList.contains('modal-overlay')) {
+    e.target.classList.remove('active');
+  }
+});
 
 // Helper to communicate with C++ Win32 Backend
 function sendToCpp(action, data = {}) {
@@ -51,18 +77,20 @@ function formatBytes(bytes) {
 }
 
 function formatTime(seconds) {
-  if (!seconds || seconds <= 0 || !isFinite(seconds)) return '0s';
+  if (!seconds || seconds <= 0 || !isFinite(seconds)) return '--';
   if (seconds < 60) return `${Math.ceil(seconds)}s`;
   const m = Math.floor(seconds / 60);
   const s = Math.ceil(seconds % 60);
   return `${m}m ${s}s`;
 }
 
-// Tab Switching (Sidebar Rail)
-document.querySelectorAll('.nav-btn, .tab-btn').forEach(btn => {
+// ========================================================
+// 🧭 TAB NAVIGATION (Sidebar Rail)
+// ========================================================
+document.querySelectorAll('.nav-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.nav-btn, .tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-pane, .tab-content').forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(c => c.classList.remove('active'));
 
     btn.classList.add('active');
     const tabName = btn.getAttribute('data-tab');
@@ -71,47 +99,28 @@ document.querySelectorAll('.nav-btn, .tab-btn').forEach(btn => {
   });
 });
 
-// Dropzone & File Handling
-const dropzone = document.getElementById('dropzone');
+// ========================================================
+// 📁 FILE SELECTION & DRAG-AND-DROP (LocalSend Parity)
+// ========================================================
 const filePicker = document.getElementById('file-picker');
+const selectionGridEmpty = document.getElementById('selection-grid-empty');
+const selectionCardActive = document.getElementById('selection-card-active');
+const compactFilesCount = document.getElementById('compact-files-count');
+const compactFilesSize = document.getElementById('compact-files-size');
+const compactFilesPreview = document.getElementById('compact-files-preview');
+const compactSyncStatus = document.getElementById('compact-sync-status');
+const modalFileListItems = document.getElementById('modal-file-list-items');
 
-if (dropzone) {
-  dropzone.addEventListener('click', () => {
-    sendToCpp('browse_files');
-  });
-
-  dropzone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropzone.classList.add('dragover');
-  });
-
-  dropzone.addEventListener('dragleave', () => {
-    dropzone.classList.remove('dragover');
-  });
-
-  dropzone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropzone.classList.remove('dragover');
-    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      addFileObjects(Array.from(e.dataTransfer.files));
-    }
-  });
-}
-
-if (filePicker) {
-  filePicker.addEventListener('change', (e) => {
-    if (e.target.files && e.target.files.length > 0) {
-      addFileObjects(Array.from(e.target.files));
-    }
-  });
-}
-
-// Selection Action Tiles (LocalSend Style)
+// Empty State Tiles
 const tileFile = document.getElementById('tile-file');
 const tileFolder = document.getElementById('tile-folder');
+const tileText = document.getElementById('tile-text');
 const tilePaste = document.getElementById('tile-paste');
-const tileClear = document.getElementById('tile-clear');
-const btnClearSelection = document.getElementById('btn-clear-selection');
+
+// Active Card Actions
+const btnCompactClear = document.getElementById('btn-compact-clear');
+const btnCompactAdd = document.getElementById('btn-compact-add');
+const btnCompactEdit = document.getElementById('btn-compact-edit');
 
 if (tileFile) {
   tileFile.addEventListener('click', () => {
@@ -122,6 +131,17 @@ if (tileFile) {
 if (tileFolder) {
   tileFolder.addEventListener('click', () => {
     sendToCpp('browse_folder_files');
+  });
+}
+
+if (tileText) {
+  tileText.addEventListener('click', () => {
+    const text = prompt('Enter a short text message or link to share:');
+    if (text && text.trim().length > 0) {
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const file = new File([blob], `note_${Date.now()}.txt`, { type: 'text/plain' });
+      addFileObjects([file]);
+    }
   });
 }
 
@@ -140,28 +160,55 @@ if (tilePaste) {
     } catch (err) {
       console.warn('Clipboard read error:', err);
     }
+    alert('Clipboard is empty or does not contain text.');
   });
 }
 
-if (tileClear) {
-  tileClear.addEventListener('click', () => {
+if (btnCompactClear) {
+  btnCompactClear.addEventListener('click', () => {
     clearAllFiles();
   });
 }
 
-if (btnClearSelection) {
-  btnClearSelection.addEventListener('click', () => {
-    clearAllFiles();
+if (btnCompactAdd) {
+  btnCompactAdd.addEventListener('click', () => {
+    sendToCpp('browse_files');
   });
 }
+
+if (btnCompactEdit) {
+  btnCompactEdit.addEventListener('click', () => {
+    window.openModal('modal-file-list');
+  });
+}
+
+if (filePicker) {
+  filePicker.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      addFileObjects(Array.from(e.target.files));
+    }
+  });
+}
+
+// Window Drag and Drop
+window.addEventListener('dragover', (e) => {
+  e.preventDefault();
+});
+
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+    addFileObjects(Array.from(e.dataTransfer.files));
+  }
+});
 
 function syncSharedFilesToCpp() {
   const paths = selectedFiles.map(f => f.path).filter(p => !!p);
   sendToCpp('set_shared_files', { files: paths });
-  
-  const statusEl = document.getElementById('shared-files-status');
-  if (statusEl) {
-    statusEl.innerText = `${selectedFiles.length} file(s) staged for phone download`;
+  if (compactSyncStatus) {
+    compactSyncStatus.innerText = selectedFiles.length > 0
+      ? `⚡ ${selectedFiles.length} file(s) staged for hotspot link`
+      : '⚡ Staged for offline hotspot link';
   }
 }
 
@@ -180,46 +227,62 @@ function addFileObjects(newFiles) {
 }
 
 function renderSelectedFiles() {
-  const container = document.getElementById('selected-files-list');
-  const cardContainer = document.getElementById('selected-files-container');
-  const summaryEl = document.getElementById('selected-files-summary');
-  const tileClearEl = document.getElementById('tile-clear');
-  const badgeEl = document.getElementById('selection-summary-badge');
-  const countTextEl = document.getElementById('selection-count-text');
+  const totalFiles = selectedFiles.length;
+  const totalBytes = selectedFiles.reduce((acc, f) => acc + (f.size || 0), 0);
 
-  if (!container) return;
-  container.innerHTML = '';
-
-  if (selectedFiles.length === 0) {
-    if (cardContainer) cardContainer.style.display = 'none';
-    if (tileClearEl) tileClearEl.style.display = 'none';
-    if (badgeEl) badgeEl.style.display = 'none';
+  if (totalFiles === 0) {
+    if (selectionGridEmpty) selectionGridEmpty.style.display = 'grid';
+    if (selectionCardActive) selectionCardActive.style.display = 'none';
+    if (modalFileListItems) modalFileListItems.innerHTML = '<div class="popup-hint text-center">No files selected.</div>';
     syncSharedFilesToCpp();
     return;
   }
 
-  if (cardContainer) cardContainer.style.display = 'block';
-  if (tileClearEl) tileClearEl.style.display = 'flex';
-  if (badgeEl) badgeEl.style.display = 'inline-block';
-  if (countTextEl) countTextEl.innerText = `${selectedFiles.length} files`;
+  if (selectionGridEmpty) selectionGridEmpty.style.display = 'none';
+  if (selectionCardActive) selectionCardActive.style.display = 'block';
 
-  const totalBytes = selectedFiles.reduce((acc, f) => acc + (f.size || 0), 0);
-  if (summaryEl) {
-    summaryEl.innerText = `${selectedFiles.length} file(s) selected (${formatBytes(totalBytes)})`;
+  if (compactFilesCount) compactFilesCount.innerText = `Files: ${totalFiles}`;
+  if (compactFilesSize) compactFilesSize.innerText = `Size: ${formatBytes(totalBytes)}`;
+
+  // Render mini pills preview (up to 4 items)
+  if (compactFilesPreview) {
+    compactFilesPreview.innerHTML = '';
+    const sliceCount = Math.min(totalFiles, 4);
+    for (let i = 0; i < sliceCount; i++) {
+      const f = selectedFiles[i];
+      const pill = document.createElement('div');
+      pill.className = 'file-preview-pill';
+      pill.innerHTML = `
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <span title="${f.name}">${f.name}</span>
+      `;
+      compactFilesPreview.appendChild(pill);
+    }
+    if (totalFiles > 4) {
+      const morePill = document.createElement('div');
+      morePill.className = 'file-preview-pill';
+      morePill.style.color = 'var(--accent-cyan)';
+      morePill.innerText = `+${totalFiles - 4} more`;
+      compactFilesPreview.appendChild(morePill);
+    }
   }
 
-  selectedFiles.forEach((f, idx) => {
-    const item = document.createElement('div');
-    item.className = 'file-item';
-    item.innerHTML = `
-      <div class="file-name" title="${f.name}">${f.name}</div>
-      <div style="display: flex; align-items: center; gap: 10px;">
-        <span class="file-size">${formatBytes(f.size)}</span>
-        <button class="file-remove-btn" title="Remove" onclick="removeSelectedFile(${idx})">✕</button>
-      </div>
-    `;
-    container.appendChild(item);
-  });
+  // Render detailed modal list items
+  if (modalFileListItems) {
+    modalFileListItems.innerHTML = '';
+    selectedFiles.forEach((f, idx) => {
+      const item = document.createElement('div');
+      item.className = 'file-item';
+      item.innerHTML = `
+        <div class="file-name" title="${f.name}">${f.name}</div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span class="file-size">${formatBytes(f.size)}</span>
+          <button class="file-remove-btn" title="Remove" onclick="removeSelectedFile(${idx})">✕</button>
+        </div>
+      `;
+      modalFileListItems.appendChild(item);
+    });
+  }
 
   syncSharedFilesToCpp();
 }
@@ -238,51 +301,346 @@ window.clearAllFiles = function() {
 };
 
 // ========================================================
-// 🌐 WEBRTC ROOM CODE SHARING (SENDER)
+// 🎯 HEADER ACTION BUTTONS & MODAL TRIGGERS
 // ========================================================
-const btnStartWebShare = document.getElementById('btn-start-web-share');
-const btnStopWebShare = document.getElementById('btn-stop-web-share');
-const webShareIdle = document.getElementById('web-share-idle');
-const webShareActive = document.getElementById('web-share-active');
-const shareCodeDisplay = document.getElementById('share-code-display');
-const shareUrlText = document.getElementById('share-url-text');
-const qrcodeContainer = document.getElementById('qrcode-container');
-const webShareStatus = document.getElementById('web-share-status');
-const btnCopyCode = document.getElementById('btn-copy-code');
-const btnCopyUrl = document.getElementById('btn-copy-url');
 
-let qrcodeInstance = null;
-let p2pEstablished = false;
-let relayFallbackTimeout = null;
+// 1. Rescan Peers (Button with Spin Animation)
+const btnRescanPeers = document.getElementById('btn-rescan-peers');
+if (btnRescanPeers) {
+  btnRescanPeers.addEventListener('click', () => {
+    btnRescanPeers.style.transform = 'rotate(180deg)';
+    btnRescanPeers.style.transition = 'transform 0.4s ease';
+    setTimeout(() => { btnRescanPeers.style.transform = 'none'; }, 400);
+    sendToCpp('rescan_peers');
+  });
+}
 
-btnStartWebShare.addEventListener('click', () => {
-  if (selectedFileObjects.length === 0) {
-    filePicker.click();
+// 2. Manual Sending (🎯 Modal)
+const btnOpenManualSend = document.getElementById('btn-open-manual-send');
+const btnConfirmManualSend = document.getElementById('btn-confirm-manual-send');
+const manualIpInput = document.getElementById('manual-ip-input');
+const manualPortInput = document.getElementById('manual-port-input');
+
+if (btnOpenManualSend) {
+  btnOpenManualSend.addEventListener('click', () => {
+    window.openModal('modal-manual-send');
+    setTimeout(() => { manualIpInput?.focus(); }, 100);
+  });
+}
+
+if (btnConfirmManualSend) {
+  btnConfirmManualSend.addEventListener('click', () => {
+    const ip = (manualIpInput?.value || '').trim();
+    const port = parseInt(manualPortInput?.value, 10) || 53317;
+
+    if (!ip) {
+      alert('Please enter a target IP address (e.g. 192.168.1.100)');
+      return;
+    }
+    if (selectedFiles.length === 0) {
+      alert('Please select files to send first!');
+      return;
+    }
+
+    window.sendToPeer(ip, port);
+    window.closeModal('modal-manual-send');
+  });
+}
+
+// 3. Share via Link (🔗 Local Web Portal Modal)
+const btnOpenShareLink = document.getElementById('btn-open-share-link');
+const btnReceiveViewPortal = document.getElementById('btn-receive-view-portal');
+const btnModalOpenBrowser = document.getElementById('btn-modal-open-browser');
+const btnModalCopyLink = document.getElementById('btn-modal-copy-link');
+const modalLocalUrlText = document.getElementById('modal-local-url-text');
+const localModalQrcode = document.getElementById('local-modal-qrcode');
+
+function updateShareLinkModal() {
+  const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
+  const port = currentSettings.port || 53317;
+  const localUrl = `http://${ip}:${port}`;
+
+  if (modalLocalUrlText) modalLocalUrlText.innerText = localUrl;
+
+  if (localModalQrcode) {
+    localModalQrcode.innerHTML = '';
+    if (typeof QRCode !== 'undefined') {
+      localQrInstance = new QRCode(localModalQrcode, {
+        text: localUrl,
+        width: 170,
+        height: 170,
+        colorDark: '#030712',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    }
+  }
+}
+
+if (btnOpenShareLink) {
+  btnOpenShareLink.addEventListener('click', () => {
+    updateShareLinkModal();
+    window.openModal('modal-share-link');
+  });
+}
+
+if (btnReceiveViewPortal) {
+  btnReceiveViewPortal.addEventListener('click', () => {
+    updateShareLinkModal();
+    window.openModal('modal-share-link');
+  });
+}
+
+if (btnModalOpenBrowser) {
+  btnModalOpenBrowser.addEventListener('click', () => {
+    const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
+    const localUrl = `http://${ip}:${currentSettings.port || 53317}`;
+    sendToCpp('open_url', { url: localUrl });
+  });
+}
+
+if (btnModalCopyLink) {
+  btnModalCopyLink.addEventListener('click', () => {
+    const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
+    const localUrl = `http://${ip}:${currentSettings.port || 53317}`;
+    navigator.clipboard.writeText(localUrl);
+    btnModalCopyLink.innerText = 'Copied! ✓';
+    setTimeout(() => { btnModalCopyLink.innerText = 'Copy Link'; }, 1800);
+  });
+}
+
+// 4. Remote WebRTC Share (🌐 Room Code Sender Modal)
+const btnOpenRemoteShare = document.getElementById('btn-open-remote-share');
+const btnModalStartRoom = document.getElementById('btn-modal-start-room');
+const btnModalCopyRoomLink = document.getElementById('btn-modal-copy-room-link');
+const remoteShareIdleView = document.getElementById('remote-share-idle-view');
+const remoteShareActiveView = document.getElementById('remote-share-active-view');
+const modalRoomCodeDisplay = document.getElementById('modal-room-code-display');
+const modalRoomUrlText = document.getElementById('modal-room-url-text');
+const remoteModalQrcode = document.getElementById('remote-modal-qrcode');
+const modalRoomStatus = document.getElementById('modal-room-status');
+
+if (btnOpenRemoteShare) {
+  btnOpenRemoteShare.addEventListener('click', () => {
+    window.openModal('modal-remote-share');
+  });
+}
+
+if (btnModalStartRoom) {
+  btnModalStartRoom.addEventListener('click', () => {
+    if (selectedFileObjects.length === 0 && selectedFiles.length === 0) {
+      if (filePicker) filePicker.click();
+      return;
+    }
+    startWebRTCShareSession();
+  });
+}
+
+if (btnModalCopyRoomLink) {
+  btnModalCopyRoomLink.addEventListener('click', () => {
+    if (currentSenderCode) {
+      const url = `https://share.sunilshahid.com/?code=${currentSenderCode}`;
+      navigator.clipboard.writeText(url);
+      btnModalCopyRoomLink.innerText = 'Copied! ✓';
+      setTimeout(() => { btnModalCopyRoomLink.innerText = 'Copy Direct Link'; }, 1800);
+    }
+  });
+}
+
+// 5. Receive via Room Code Modal (Receiver)
+const btnOpenCodeModal = document.getElementById('btn-open-code-modal');
+const modalInputReceiveCode = document.getElementById('modal-input-receive-code');
+const btnModalConfirmReceive = document.getElementById('btn-modal-confirm-receive');
+const modalReceiveCodeStatus = document.getElementById('modal-receive-code-status');
+
+if (btnOpenCodeModal) {
+  btnOpenCodeModal.addEventListener('click', () => {
+    window.openModal('modal-receive-code');
+    setTimeout(() => { modalInputReceiveCode?.focus(); }, 100);
+  });
+}
+
+if (modalInputReceiveCode) {
+  modalInputReceiveCode.addEventListener('input', (e) => {
+    let val = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+    if (!val.includes('-') && val.length > 3) {
+      val = `${val.slice(0, 3)}-${val.slice(3, 6)}`;
+    }
+    if (val.length > 7) val = val.slice(0, 7);
+    modalInputReceiveCode.value = val;
+  });
+}
+
+if (btnModalConfirmReceive) {
+  btnModalConfirmReceive.addEventListener('click', () => {
+    const code = (modalInputReceiveCode?.value || '').trim().toUpperCase();
+    if (code.length < 6) {
+      alert('Please enter a valid 6-digit room code (e.g. 123-456)');
+      return;
+    }
+    if (modalReceiveCodeStatus) {
+      modalReceiveCodeStatus.style.display = 'block';
+      modalReceiveCodeStatus.innerText = `Connecting to room [${code}]...`;
+    }
+    startWebRTCReceiverSession(code);
+    setTimeout(() => {
+      window.closeModal('modal-receive-code');
+    }, 600);
+  });
+}
+
+// ========================================================
+// 📊 LIVE IN-APP RECEIVING & TRANSFER PANEL (On-Screen)
+// ========================================================
+const receiveLivePanel = document.getElementById('receive-live-panel');
+const receiveLiveTitle = document.getElementById('receive-live-title');
+const receiveLiveFile = document.getElementById('receive-live-file');
+const receiveLivePct = document.getElementById('receive-live-pct');
+const receiveLiveBytes = document.getElementById('receive-live-bytes');
+const receiveLiveFill = document.getElementById('receive-live-fill');
+const receiveLiveSpeed = document.getElementById('receive-live-speed');
+const receiveLiveEta = document.getElementById('receive-live-eta');
+const btnReceiveCancelTransfer = document.getElementById('btn-receive-cancel-transfer');
+
+function updateLiveTransferUI(p) {
+  if (!receiveLivePanel) return;
+
+  clearTimeout(livePanelHideTimeout);
+  receiveLivePanel.style.display = 'block';
+
+  if (receiveLiveTitle && p.title) receiveLiveTitle.innerText = p.title;
+  if (receiveLiveFile && p.fileName) receiveLiveFile.innerText = p.fileName;
+
+  const pct = Math.min(100, Math.max(0, p.percentage || 0));
+  if (receiveLivePct) receiveLivePct.innerText = `${pct}%`;
+  if (receiveLiveFill) receiveLiveFill.style.width = `${pct}%`;
+  if (receiveLiveBytes) receiveLiveBytes.innerText = `${formatBytes(p.transferredBytes)} / ${formatBytes(p.totalBytes)}`;
+  if (receiveLiveSpeed) receiveLiveSpeed.innerText = `${(p.speedMBs || 0).toFixed(1)} MB/s`;
+  if (receiveLiveEta) receiveLiveEta.innerText = formatTime(p.etaSeconds);
+}
+
+function completeLiveTransferUI(title, totalBytes) {
+  if (!receiveLivePanel) return;
+
+  if (receiveLiveTitle) receiveLiveTitle.innerText = 'Transfer Complete! 🎉';
+  if (receiveLivePct) receiveLivePct.innerText = '100%';
+  if (receiveLiveFill) receiveLiveFill.style.width = '100%';
+  if (receiveLiveEta) receiveLiveEta.innerText = 'Done';
+
+  addTransferHistoryItem(title || 'File Transfer', totalBytes || 0, 'Success');
+
+  clearTimeout(livePanelHideTimeout);
+  livePanelHideTimeout = setTimeout(() => {
+    receiveLivePanel.style.display = 'none';
+  }, 4000);
+}
+
+function errorLiveTransferUI(message) {
+  if (!receiveLivePanel) return;
+
+  if (receiveLiveTitle) receiveLiveTitle.innerText = message || 'Transfer Cancelled';
+
+  clearTimeout(livePanelHideTimeout);
+  livePanelHideTimeout = setTimeout(() => {
+    receiveLivePanel.style.display = 'none';
+  }, 2500);
+}
+
+if (btnReceiveCancelTransfer) {
+  btnReceiveCancelTransfer.addEventListener('click', () => {
+    sendToCpp('cancel_transfer');
+    stopWebRTCShareSession();
+    if (receiveLiveTitle) receiveLiveTitle.innerText = 'Cancelling transfer...';
+    setTimeout(() => {
+      if (receiveLivePanel) receiveLivePanel.style.display = 'none';
+    }, 1000);
+  });
+}
+
+function addTransferHistoryItem(title, size, status) {
+  const hist = document.getElementById('transfer-history');
+  if (!hist) return;
+  if (hist.innerText.includes('No recent')) hist.innerHTML = '';
+  const item = document.createElement('div');
+  item.className = 'history-row';
+  const sizeText = size > 0 ? ` — ${formatBytes(size)}` : '';
+  item.innerHTML = `
+    <span class="history-name">${title}${sizeText}</span>
+    <span class="history-status">${status}</span>
+  `;
+  hist.prepend(item);
+}
+
+// ========================================================
+// 📡 UDP RADAR & PEER DISCOVERY
+// ========================================================
+function renderPeers() {
+  const grid = document.getElementById('peer-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  if (!activePeers || activePeers.length === 0) {
+    grid.innerHTML = `
+      <div class="radar-empty-state">
+        <div class="radar-scan-ring">
+          <span class="radar-scan-dot"></span>
+        </div>
+        <div class="radar-empty-text">Scanning for nearby BlackHole devices on your Wi-Fi...</div>
+        <div class="radar-troubleshoot-link" id="link-radar-troubleshoot">
+          Please ensure the desired target is also on the same Wi-Fi network.
+        </div>
+      </div>
+    `;
     return;
   }
-  startWebRTCShareSession();
-});
 
-btnStopWebShare.addEventListener('click', () => {
-  stopWebRTCShareSession();
-});
+  activePeers.forEach(peer => {
+    const card = document.createElement('div');
+    card.className = 'peer-card';
 
-btnCopyCode.addEventListener('click', () => {
-  if (currentSenderCode) {
-    navigator.clipboard.writeText(currentSenderCode);
-    btnCopyCode.innerText = 'Copied! ✓';
-    setTimeout(() => { btnCopyCode.innerText = 'Copy Code'; }, 1800);
+    card.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <div style="width: 38px; height: 38px; border-radius: 10px; background: rgba(139,92,246,0.15); display: flex; align-items: center; justify-content: center; color: #a855f7;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+        </div>
+        <div class="peer-info">
+          <h4>${peer.alias || 'Device'}</h4>
+          <span>${peer.ip}:${peer.port}</span>
+        </div>
+      </div>
+      <button class="btn-primary-gradient" style="padding: 7px 16px; font-size: 0.82rem;" onclick="sendToPeer('${peer.ip}', ${peer.port})">
+        Send
+      </button>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+window.sendToPeer = function(peerIp, peerPort) {
+  if (selectedFiles.length === 0) {
+    alert('Please select files first using the selection grid above!');
+    return;
   }
-});
+  const filePaths = selectedFiles.map(f => f.path);
+  sendToCpp('send_files', { peerIp, peerPort, files: filePaths });
 
-btnCopyUrl.addEventListener('click', () => {
-  if (currentSenderCode) {
-    const url = `https://share.sunilshahid.com/?code=${currentSenderCode}`;
-    navigator.clipboard.writeText(url);
-    btnCopyUrl.innerText = 'Copied! ✓';
-    setTimeout(() => { btnCopyUrl.innerText = 'Copy Direct Link'; }, 1800);
-  }
-});
+  // Display sending progress right away
+  updateLiveTransferUI({
+    title: `Sending to ${peerIp}...`,
+    fileName: selectedFiles[0]?.name || 'Files',
+    percentage: 0,
+    transferredBytes: 0,
+    totalBytes: selectedFiles.reduce((acc, f) => acc + (f.size || 0), 0),
+    speedMBs: 0,
+    etaSeconds: 0
+  });
+};
+
+// ========================================================
+// 🌐 WEBRTC ROOM CODE SHARING (SENDER)
+// ========================================================
+let p2pEstablished = false;
+let relayFallbackTimeout = null;
 
 function stopWebRTCShareSession() {
   clearTimeout(relayFallbackTimeout);
@@ -290,7 +648,6 @@ function stopWebRTCShareSession() {
   senderCancelled = true;
   isSenderTransferring = false;
   p2pEstablished = false;
-  hasShownOverlay = false;
 
   if (webrtcSenderWS) {
     try { webrtcSenderWS.close(); } catch {}
@@ -302,20 +659,18 @@ function stopWebRTCShareSession() {
   }
 
   currentSenderCode = '';
-  webShareActive.style.display = 'none';
-  webShareIdle.style.display = 'flex';
-  document.getElementById('transfer-overlay').classList.remove('active');
+  if (remoteShareActiveView) remoteShareActiveView.style.display = 'none';
+  if (remoteShareIdleView) remoteShareIdleView.style.display = 'block';
 }
 
 function startWebRTCShareSession() {
   stopWebRTCShareSession();
   senderCancelled = false;
-  hasShownOverlay = false;
 
-  webShareIdle.style.display = 'none';
-  webShareActive.style.display = 'flex';
-  shareCodeDisplay.innerText = '...';
-  webShareStatus.innerText = 'Connecting to signaling network...';
+  if (remoteShareIdleView) remoteShareIdleView.style.display = 'none';
+  if (remoteShareActiveView) remoteShareActiveView.style.display = 'block';
+  if (modalRoomCodeDisplay) modalRoomCodeDisplay.innerText = '...';
+  if (modalRoomStatus) modalRoomStatus.innerText = 'Connecting to signaling network...';
 
   try {
     const ws = new WebSocket(SIGNALING_WS_URL);
@@ -332,7 +687,7 @@ function startWebRTCShareSession() {
         const packet = decodePacket(event.data);
         if (packet.type === 'control') {
           if (packet.message.type === 'TRANSFER_ACK') {
-            onTransferCompleted('Web Client');
+            completeLiveTransferUI('Web Client', selectedFiles.reduce((acc, f) => acc + (f.size || 0), 0));
           } else if (packet.message.type === 'TRANSFER_CANCEL') {
             alert('Transfer was cancelled by receiver.');
             stopWebRTCShareSession();
@@ -350,31 +705,31 @@ function startWebRTCShareSession() {
 
       if (msg.type === 'room-created') {
         currentSenderCode = msg.code;
-        shareCodeDisplay.innerText = msg.code;
+        if (modalRoomCodeDisplay) modalRoomCodeDisplay.innerText = msg.code;
         const shareUrl = `https://share.sunilshahid.com/?code=${msg.code}`;
-        shareUrlText.innerText = shareUrl;
-        webShareStatus.innerText = 'Waiting for recipient to connect...';
+        if (modalRoomUrlText) modalRoomUrlText.innerText = shareUrl;
+        if (modalRoomStatus) modalRoomStatus.innerText = 'Waiting for recipient to connect...';
 
         // Render QR Code
-        qrcodeContainer.innerHTML = '';
-        if (typeof QRCode !== 'undefined') {
-          qrcodeInstance = new QRCode(qrcodeContainer, {
-            text: shareUrl,
-            width: 180,
-            height: 180,
-            colorDark: "#000000",
-            colorLight: "#ffffff",
-            correctLevel: QRCode.CorrectLevel.M
-          });
+        if (remoteModalQrcode) {
+          remoteModalQrcode.innerHTML = '';
+          if (typeof QRCode !== 'undefined') {
+            remoteQrInstance = new QRCode(remoteModalQrcode, {
+              text: shareUrl,
+              width: 170,
+              height: 170,
+              colorDark: '#030712',
+              colorLight: '#ffffff',
+              correctLevel: QRCode.CorrectLevel.M
+            });
+          }
         }
 
-        // Initialize WebRTC Manager as Sender with OUR physical local IPs
         initWebRTCSender(msg.code, ws, localIps);
       }
       else if (msg.type === 'peer-joined') {
-        webShareStatus.innerText = 'Receiver connected! Opening direct secure tunnel...';
+        if (modalRoomStatus) modalRoomStatus.innerText = 'Receiver connected! Opening direct tunnel...';
 
-        // Share our real local IP addresses with the peer
         if (ws.readyState === WebSocket.OPEN && localIps.length > 0) {
           ws.send(JSON.stringify({ type: 'signal', data: { peerLocalIps: localIps } }));
         }
@@ -384,11 +739,9 @@ function startWebRTCShareSession() {
           ws.send(JSON.stringify({ type: 'signal', data: { sdp: offer, peerLocalIps: localIps } }));
         }
 
-        // Fallback to relay only after 12 seconds if direct P2P does not open
         clearTimeout(relayFallbackTimeout);
         relayFallbackTimeout = setTimeout(() => {
           if (!p2pEstablished && !isSenderTransferring) {
-            console.log('[WebRTC Sender] P2P timeout. Switching to Encrypted WebSocket Relay...');
             startRelaySender(currentSenderCode);
           }
         }, 12000);
@@ -409,23 +762,21 @@ function startWebRTCShareSession() {
         }
       }
       else if (msg.type === 'peer-disconnected') {
-        webShareStatus.innerText = 'Receiver disconnected.';
+        if (modalRoomStatus) modalRoomStatus.innerText = 'Receiver disconnected.';
       }
     };
 
     ws.onerror = () => {
-      webShareStatus.innerText = 'Failed to connect to signaling server.';
+      if (modalRoomStatus) modalRoomStatus.innerText = 'Failed to connect to signaling server.';
     };
   } catch (err) {
-    webShareStatus.innerText = 'Error: ' + (err.message || err);
+    if (modalRoomStatus) modalRoomStatus.innerText = 'Error: ' + (err.message || err);
   }
 }
 
 function initWebRTCSender(code, ws, myIps) {
   const webrtc = new WebRTCManager(true, {
-    onConnectionModeChange: (mode, route) => {
-      updateModeBadge(mode, route);
-    },
+    onConnectionModeChange: () => {},
     onSignal: (data) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'signal', data }));
@@ -434,32 +785,7 @@ function initWebRTCSender(code, ws, myIps) {
     onDataChannelOpen: async () => {
       p2pEstablished = true;
       clearTimeout(relayFallbackTimeout);
-      webShareStatus.innerText = 'Direct secure tunnel established! Streaming files...';
-
-      // Verify PING / PONG
-      const dc = webrtc.getDataChannel();
-      let pongReceived = false;
-      const onMsg = (ev) => {
-        if (ev.data instanceof ArrayBuffer) {
-          const pkt = decodePacket(ev.data);
-          if (pkt.type === 'control' && pkt.message.type === 'RTC_PONG') {
-            pongReceived = true;
-          }
-        }
-      };
-
-      if (dc) {
-        dc.addEventListener('message', onMsg);
-        try {
-          await webrtc.sendPacket(encodeControlPacket({ type: 'RTC_PING' }));
-        } catch {}
-      }
-
-      for (let i = 0; i < 20; i++) {
-        if (pongReceived) break;
-        await new Promise(r => setTimeout(r, 100));
-      }
-      if (dc) dc.removeEventListener('message', onMsg);
+      if (modalRoomStatus) modalRoomStatus.innerText = 'Secure tunnel open! Streaming files...';
 
       startWebRTCDataTransfer(code, webrtc);
     },
@@ -481,7 +807,7 @@ function initWebRTCSender(code, ws, myIps) {
 
 async function startWebRTCDataTransfer(code, transport) {
   isSenderTransferring = true;
-  showTransferOverlay('Sending Files via WebRTC...', 'Web Client');
+  window.closeModal('modal-remote-share');
 
   try {
     const cryptoKey = await deriveKeyFromSecret(code);
@@ -490,12 +816,21 @@ async function startWebRTCDataTransfer(code, transport) {
       transport,
       cryptoKey,
       (p) => {
-        updateTransferOverlayProgress(p);
+        const speedMB = (p.speedBytesPerSec / (1024 * 1024));
+        updateLiveTransferUI({
+          title: 'Sending via WebRTC...',
+          fileName: p.currentFileName,
+          percentage: p.percentage,
+          transferredBytes: p.transferredBytes,
+          totalBytes: p.totalBytes,
+          speedMBs: speedMB,
+          etaSeconds: p.etaSeconds
+        });
       },
       () => senderCancelled
     );
 
-    onTransferCompleted('Web Client');
+    completeLiveTransferUI('Web Client', selectedFiles.reduce((acc, f) => acc + (f.size || 0), 0));
   } catch (err) {
     if (!senderCancelled) {
       console.warn('[WebRTC Sender] Fallback to relay:', err);
@@ -508,10 +843,7 @@ async function startRelaySender(code) {
   if (!webrtcSenderWS || webrtcSenderWS.readyState !== WebSocket.OPEN) return;
   clearTimeout(relayFallbackTimeout);
 
-  updateModeBadge('relay', 'Cloud Relay Fallback');
-  webShareStatus.innerText = 'Connected via Encrypted Relay. Streaming...';
-  showTransferOverlay('Streaming via Encrypted Relay...', 'Web Client');
-
+  window.closeModal('modal-remote-share');
   webrtcSenderWS.send(JSON.stringify({ type: 'signal', data: { switchToRelay: true } }));
 
   const relayTransport = {
@@ -534,12 +866,21 @@ async function startRelaySender(code) {
       relayTransport,
       cryptoKey,
       (p) => {
-        updateTransferOverlayProgress(p);
+        const speedMB = (p.speedBytesPerSec / (1024 * 1024));
+        updateLiveTransferUI({
+          title: 'Streaming via Encrypted Relay...',
+          fileName: p.currentFileName,
+          percentage: p.percentage,
+          transferredBytes: p.transferredBytes,
+          totalBytes: p.totalBytes,
+          speedMBs: speedMB,
+          etaSeconds: p.etaSeconds
+        });
       },
       () => senderCancelled
     );
 
-    onTransferCompleted('Web Client (Relay)');
+    completeLiveTransferUI('Web Client (Relay)', selectedFiles.reduce((acc, f) => acc + (f.size || 0), 0));
   } catch (err) {
     if (!senderCancelled) {
       alert('Relay transfer error: ' + (err.message || err));
@@ -551,34 +892,7 @@ async function startRelaySender(code) {
 // ========================================================
 // 📥 WEBRTC ROOM CODE RECEIVER (RECEIVE TAB)
 // ========================================================
-const inputReceiveCode = document.getElementById('input-receive-code');
-const btnConnectCode = document.getElementById('btn-connect-code');
-const receiveStatusMsg = document.getElementById('receive-status-msg');
-
-inputReceiveCode.addEventListener('input', (e) => {
-  let val = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '');
-  if (!val.includes('-') && val.length > 3) {
-    val = `${val.slice(0, 3)}-${val.slice(3, 6)}`;
-  }
-  if (val.length > 7) val = val.slice(0, 7);
-  inputReceiveCode.value = val;
-});
-
-btnConnectCode.addEventListener('click', () => {
-  const code = inputReceiveCode.value.trim().toUpperCase();
-  if (code.length < 6) {
-    alert('Please enter a valid 6-digit room code (e.g. 123-456)');
-    return;
-  }
-  startWebRTCReceiverSession(code);
-});
-
 function startWebRTCReceiverSession(code) {
-  hasShownOverlay = false;
-  receiveStatusMsg.style.display = 'block';
-  receiveStatusMsg.innerText = `Connecting to room [${code}]...`;
-  btnConnectCode.disabled = true;
-
   try {
     const ws = new WebSocket(SIGNALING_WS_URL);
     ws.binaryType = 'arraybuffer';
@@ -586,49 +900,54 @@ function startWebRTCReceiverSession(code) {
 
     const packetQueue = [];
 
-    // Initialize Receiver WebRTC Engine
     deriveKeyFromSecret(code).then(cryptoKey => {
       receiverEngine = new FileReceiverWebRTC(
         cryptoKey,
         (p) => {
-          updateTransferOverlayProgress(p);
+          const speedMB = (p.speedBytesPerSec / (1024 * 1024));
+          updateLiveTransferUI({
+            title: `Receiving from [${code}]...`,
+            fileName: p.currentFileName,
+            percentage: p.percentage,
+            transferredBytes: p.transferredBytes,
+            totalBytes: p.totalBytes,
+            speedMBs: speedMB,
+            etaSeconds: p.etaSeconds
+          });
         },
         (file) => {
           triggerFileSave(file);
         },
         () => {
-          onTransferCompleted(`Sender [${code}]`);
+          completeLiveTransferUI(`Sender [${code}]`, 0);
           try {
             const ack = encodeControlPacket({ type: 'TRANSFER_ACK' });
             if (webrtcReceiverManager) webrtcReceiverManager.sendPacket(ack).catch(() => {});
             if (ws.readyState === WebSocket.OPEN) ws.send(ack.buffer);
           } catch {}
-          btnConnectCode.disabled = false;
         }
       );
     });
 
     const webrtc = new WebRTCManager(false, {
-      onConnectionModeChange: (mode, route) => {
-        updateModeBadge(mode, route);
-      },
+      onConnectionModeChange: () => {},
       onSignal: (data) => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'signal', data }));
         }
       },
       onDataChannelOpen: () => {
-        receiveStatusMsg.innerText = 'Connected! Receiving stream...';
-        if (!hasShownOverlay) {
-          hasShownOverlay = true;
-          showTransferOverlay('Receiving Files via WebRTC...', `Sender [${code}]`);
-        }
+        updateLiveTransferUI({
+          title: `Connected to [${code}]! Receiving...`,
+          fileName: 'Connecting...',
+          percentage: 0,
+          transferredBytes: 0,
+          totalBytes: 0,
+          speedMBs: 0,
+          etaSeconds: 0
+        });
       },
       onDataReceived: (buffer) => {
-        if (!hasShownOverlay) {
-          hasShownOverlay = true;
-          showTransferOverlay('Receiving Files via WebRTC...', `Sender [${code}]`);
-        }
         if (receiverEngine) {
           receiverEngine.handlePacket(buffer);
         } else {
@@ -641,20 +960,11 @@ function startWebRTCReceiverSession(code) {
     webrtcReceiverManager = webrtc;
 
     ws.onopen = () => {
-      receiveStatusMsg.innerText = 'Contacting sender...';
       ws.send(JSON.stringify({ type: 'join-room', code }));
     };
 
     ws.onmessage = async (event) => {
-      // Binary packet over WebSocket relay
       if (event.data instanceof ArrayBuffer) {
-        // ONLY call showTransferOverlay once! Never call on every chunk to avoid flickering!
-        if (!hasShownOverlay) {
-          hasShownOverlay = true;
-          showTransferOverlay('Receiving Files via Relay...', `Sender [${code}]`);
-          updateModeBadge('relay', 'Cloud Relay Fallback');
-        }
-
         if (receiverEngine) {
           receiverEngine.handlePacket(event.data);
         } else {
@@ -671,9 +981,6 @@ function startWebRTCReceiverSession(code) {
       }
 
       if (msg.type === 'room-joined') {
-        receiveStatusMsg.innerText = 'Room joined! Exchanging local Wi-Fi routes...';
-
-        // Share our real local IP addresses with the peer
         if (ws.readyState === WebSocket.OPEN && localIps.length > 0) {
           ws.send(JSON.stringify({ type: 'signal', data: { peerLocalIps: localIps } }));
         }
@@ -682,15 +989,7 @@ function startWebRTCReceiverSession(code) {
         if (msg.data?.peerLocalIps) {
           webrtc.setRemoteLocalIps(msg.data.peerLocalIps);
         }
-
-        if (msg.data?.switchToRelay) {
-          updateModeBadge('relay', 'Cloud Relay Fallback');
-          receiveStatusMsg.innerText = 'Connected via Encrypted Relay!';
-          if (!hasShownOverlay) {
-            hasShownOverlay = true;
-            showTransferOverlay('Receiving via Encrypted Relay...', `Sender [${code}]`);
-          }
-        } else if (msg.data?.sdp) {
+        if (msg.data?.sdp) {
           if (msg.data.sdp.type === 'offer') {
             const answer = await webrtc.createAnswer(msg.data.sdp);
             ws.send(JSON.stringify({ type: 'signal', data: { sdp: answer, peerLocalIps: localIps } }));
@@ -701,22 +1000,13 @@ function startWebRTCReceiverSession(code) {
       }
       else if (msg.type === 'error') {
         alert(msg.message || 'Room error');
-        btnConnectCode.disabled = false;
-        receiveStatusMsg.style.display = 'none';
       }
     };
-
-    ws.onerror = () => {
-      receiveStatusMsg.innerText = 'Could not reach BlackHole signaling server.';
-      btnConnectCode.disabled = false;
-    };
   } catch (err) {
-    receiveStatusMsg.innerText = 'Error: ' + (err.message || err);
-    btnConnectCode.disabled = false;
+    alert('Receiver error: ' + (err.message || err));
   }
 }
 
-// Save Received File directly to disk
 function triggerFileSave(receivedFile) {
   try {
     const a = document.createElement('a');
@@ -745,317 +1035,76 @@ function triggerFileSave(receivedFile) {
 }
 
 // ========================================================
-// 📡 NATIVE OFFLINE UDP / TCP RADAR & SETTINGS
+// ⚙️ SETTINGS & LOCAL SERVER SYNC
 // ========================================================
-
-let localQrInstance = null;
-
 function updateLocalServerDisplay() {
   const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
   const port = currentSettings.port || 53317;
   const localUrl = `http://${ip}:${port}`;
 
-  const serverUrlEl = document.getElementById('local-server-url');
-  if (serverUrlEl) serverUrlEl.innerText = localUrl;
+  const headerIp = document.getElementById('header-ip');
+  if (headerIp) headerIp.innerText = ip;
 
-  const receivePortalEl = document.getElementById('receive-portal-url');
-  if (receivePortalEl) receivePortalEl.innerText = localUrl;
+  const sidebarAlias = document.getElementById('sidebar-alias');
+  if (sidebarAlias) sidebarAlias.innerText = currentSettings.alias;
 
-  const headerIpEl = document.getElementById('header-ip');
-  if (headerIpEl) headerIpEl.innerText = ip;
+  const receiveAliasLabel = document.getElementById('receive-alias-label');
+  if (receiveAliasLabel) receiveAliasLabel.innerText = currentSettings.alias;
 
-  const sidebarAliasEl = document.getElementById('sidebar-alias');
-  if (sidebarAliasEl) sidebarAliasEl.innerText = currentSettings.alias;
+  const receiveStatusText = document.getElementById('receive-status-text');
+  if (receiveStatusText) receiveStatusText.innerText = `Ready to receive on port ${port}`;
 
-  const receiveAliasEl = document.getElementById('receive-alias-label');
-  if (receiveAliasEl) receiveAliasEl.innerText = currentSettings.alias;
+  const receivePortalLinkLabel = document.getElementById('receive-portal-link-label');
+  if (receivePortalLinkLabel) receivePortalLinkLabel.innerText = localUrl;
 
-  const receiveFolderEl = document.getElementById('receive-folder-display');
-  if (receiveFolderEl) receiveFolderEl.innerText = currentSettings.destinationFolder;
+  const receiveFolderDisplay = document.getElementById('receive-folder-display');
+  if (receiveFolderDisplay) receiveFolderDisplay.innerText = currentSettings.destinationFolder || 'Downloads\\BlackHole';
 }
 
-// Local QR Code toggle
-const btnToggleLocalQr = document.getElementById('btn-toggle-local-qr');
-const btnToggleLocalQrText = document.getElementById('btn-toggle-local-qr-text');
-const localQrBox = document.getElementById('local-qr-box');
-const localQrContainer = document.getElementById('local-qrcode-container');
-
-if (btnToggleLocalQr) {
-  btnToggleLocalQr.addEventListener('click', () => {
-    if (localQrBox.style.display === 'none') {
-      localQrBox.style.display = 'flex';
-      btnToggleLocalQrText.innerText = 'Hide QR';
-
-      const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
-      const port = currentSettings.port || 53317;
-      const localUrl = `http://${ip}:${port}`;
-
-      if (localQrContainer) {
-        localQrContainer.innerHTML = '';
-        if (typeof QRCode !== 'undefined') {
-          localQrInstance = new QRCode(localQrContainer, {
-            text: localUrl,
-            width: 140,
-            height: 140,
-            colorDark: '#09090b',
-            colorLight: '#ffffff',
-            correctLevel: QRCode.CorrectLevel.M
-          });
-        }
-      }
-    } else {
-      localQrBox.style.display = 'none';
-      btnToggleLocalQrText.innerText = 'Show QR';
-    }
+// Browse destination folder
+const btnBrowseDest = document.getElementById('btn-browse-dest');
+if (btnBrowseDest) {
+  btnBrowseDest.addEventListener('click', () => {
+    sendToCpp('browse_folder');
   });
 }
 
-// Copy Local URL buttons
-const btnCopyLocalLink = document.getElementById('btn-copy-local-link');
-if (btnCopyLocalLink) {
-  btnCopyLocalLink.addEventListener('click', () => {
-    const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
-    const localUrl = `http://${ip}:${currentSettings.port || 53317}`;
-    navigator.clipboard.writeText(localUrl);
-    btnCopyLocalLink.innerText = 'Copied! ✓';
-    setTimeout(() => { btnCopyLocalLink.innerText = 'Copy Link'; }, 1800);
+// Open received folder
+const btnOpenDownloadDir = document.getElementById('btn-open-download-dir');
+if (btnOpenDownloadDir) {
+  btnOpenDownloadDir.addEventListener('click', () => {
+    sendToCpp('open_folder', { path: currentSettings.destinationFolder });
   });
 }
 
-const btnReceiveCopyPortal = document.getElementById('btn-receive-copy-portal');
-if (btnReceiveCopyPortal) {
-  btnReceiveCopyPortal.addEventListener('click', () => {
-    const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
-    const localUrl = `http://${ip}:${currentSettings.port || 53317}`;
-    navigator.clipboard.writeText(localUrl);
-    btnReceiveCopyPortal.innerText = 'Copied! ✓';
-    setTimeout(() => { btnReceiveCopyPortal.innerText = 'Copy Link'; }, 1800);
+// Save settings button
+const btnSaveSettings = document.getElementById('btn-save-settings');
+if (btnSaveSettings) {
+  btnSaveSettings.addEventListener('click', () => {
+    const updated = {
+      alias: document.getElementById('setting-alias')?.value.trim() || 'BlackHole-PC',
+      destinationFolder: document.getElementById('setting-dest-folder')?.value.trim(),
+      quickSave: document.getElementById('setting-quick-save')?.checked ?? true,
+      port: parseInt(document.getElementById('setting-port')?.value, 10) || 53317,
+      encryptionEnabled: document.getElementById('setting-encryption')?.checked ?? true
+    };
+
+    currentSettings = updated;
+    sendToCpp('save_settings', { data: updated });
+    updateLocalServerDisplay();
+
+    btnSaveSettings.innerText = 'Saved! ✓';
+    btnSaveSettings.style.background = '#10b981';
+    setTimeout(() => {
+      btnSaveSettings.innerText = 'Save Settings';
+      btnSaveSettings.style.background = '';
+    }, 1800);
   });
 }
-
-// Open in Browser buttons
-const btnOpenLocalBrowser = document.getElementById('btn-open-local-browser');
-if (btnOpenLocalBrowser) {
-  btnOpenLocalBrowser.addEventListener('click', () => {
-    const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
-    const localUrl = `http://${ip}:${currentSettings.port || 53317}`;
-    sendToCpp('open_url', { url: localUrl });
-  });
-}
-
-const btnReceiveOpenPortal = document.getElementById('btn-receive-open-portal');
-if (btnReceiveOpenPortal) {
-  btnReceiveOpenPortal.addEventListener('click', () => {
-    const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
-    const localUrl = `http://${ip}:${currentSettings.port || 53317}`;
-    sendToCpp('open_url', { url: localUrl });
-  });
-}
-
-function renderPeers() {
-  const grid = document.getElementById('peer-grid');
-  if (!grid) return;
-  grid.innerHTML = '';
-
-  if (!activePeers || activePeers.length === 0) {
-    grid.innerHTML = `
-      <div class="no-peers">
-        <span class="radar-dot"></span>
-        Scanning local network for BlackHole devices...
-      </div>
-    `;
-    return;
-  }
-
-  activePeers.forEach(peer => {
-    const card = document.createElement('div');
-    card.className = 'peer-card';
-
-    card.innerHTML = `
-      <div style="display: flex; align-items: center; gap: 12px;">
-        <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(139,92,246,0.15); display: flex; align-items: center; justify-content: center; color: #a855f7;">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
-        </div>
-        <div class="peer-info">
-          <h4>${peer.alias || 'Device'}</h4>
-          <span>${peer.ip}:${peer.port}</span>
-        </div>
-      </div>
-      <button class="btn-primary-gradient" style="padding: 6px 14px; font-size: 0.82rem;" onclick="sendToPeer('${peer.ip}', ${peer.port})">
-        Send
-      </button>
-    `;
-    grid.appendChild(card);
-  });
-}
-
-window.sendToPeer = function(peerIp, peerPort) {
-  if (selectedFiles.length === 0) {
-    alert('Please select files first by clicking the dropzone!');
-    return;
-  }
-  const filePaths = selectedFiles.map(f => f.path);
-  sendToCpp('send_files', { peerIp, peerPort, files: filePaths });
-};
-
-// Direct IP Send
-document.getElementById('btn-direct-send').addEventListener('click', () => {
-  const ip = document.getElementById('direct-ip').value.trim();
-  const port = parseInt(document.getElementById('direct-port').value, 10) || 53317;
-
-  if (!ip) {
-    alert('Please enter a target IP address (e.g. 192.168.43.1)');
-    return;
-  }
-  window.sendToPeer(ip, port);
-});
-
-// Destination Folder Browse
-document.getElementById('btn-browse-dest').addEventListener('click', () => {
-  sendToCpp('browse_folder');
-});
-
-// Open Received Folder
-document.getElementById('btn-open-download-dir').addEventListener('click', () => {
-  sendToCpp('open_folder', { path: currentSettings.destinationFolder });
-});
-
-// Save Settings
-document.getElementById('btn-save-settings').addEventListener('click', () => {
-  const updated = {
-    alias: document.getElementById('setting-alias').value.trim() || 'BlackHole-PC',
-    destinationFolder: document.getElementById('setting-dest-folder').value.trim(),
-    quickSave: document.getElementById('setting-quick-save').checked,
-    port: parseInt(document.getElementById('setting-port').value, 10) || 53317,
-    encryptionEnabled: document.getElementById('setting-encryption').checked
-  };
-
-  currentSettings = updated;
-  sendToCpp('save_settings', { data: updated });
-
-  const btn = document.getElementById('btn-save-settings');
-  btn.innerText = 'Saved! ✓';
-  btn.style.background = '#10b981';
-  setTimeout(() => {
-    btn.innerText = 'Save Settings';
-    btn.style.background = '';
-  }, 1800);
-});
-
-// Cancel Transfer
-document.getElementById('btn-cancel-transfer').addEventListener('click', () => {
-  sendToCpp('cancel_transfer');
-  stopWebRTCShareSession();
-  hasShownOverlay = false;
-  document.getElementById('transfer-overlay').classList.remove('active');
-});
 
 // ========================================================
-// 📊 TRANSFER MODAL OVERLAY & PROGRESS UPDATES
+// 📬 MESSAGES FROM NATIVE C++ BACKEND
 // ========================================================
-function showTransferOverlay(title, peerName) {
-  const overlay = document.getElementById('transfer-overlay');
-  overlay.classList.add('active');
-  document.getElementById('transfer-modal-title').innerText = title || 'Transferring Files...';
-  document.getElementById('transfer-modal-file').innerText = peerName || '';
-  document.getElementById('transfer-fill').style.width = '0%';
-  document.getElementById('transfer-percent').innerText = '0%';
-  document.getElementById('transfer-speed').innerText = '0.0 MB/s';
-  document.getElementById('transfer-eta').innerText = '--';
-  document.getElementById('transfer-bytes').innerText = '0 B / 0 B';
-}
-
-function updateModeBadge(mode, route = '') {
-  const badge = document.getElementById('transfer-mode-badge');
-  const label = document.getElementById('route-label');
-  const details = document.getElementById('route-details');
-  const endpoints = document.getElementById('route-endpoints');
-  const sub = document.getElementById('route-sub');
-
-  if (!badge) return;
-
-  if (mode === 'lan') {
-    badge.className = 'connection-pill pill-lan';
-    label.innerText = 'Direct LAN Wire Speed';
-    if (route) {
-      details.style.display = 'flex';
-      endpoints.innerText = route;
-      sub.innerText = '• Zero Internet Bandwidth';
-      sub.style.color = '#34d399';
-    }
-  } else if (mode === 'relay') {
-    badge.className = 'connection-pill pill-relay';
-    label.innerText = 'Encrypted WebSocket Relay';
-    if (route) {
-      details.style.display = 'flex';
-      endpoints.innerText = route;
-      sub.innerText = '• Cloud Relay Tunnel';
-      sub.style.color = '#fbbf24';
-    }
-  } else if (mode === 'wan') {
-    badge.className = 'connection-pill pill-wan';
-    label.innerText = 'Internet WAN P2P';
-    if (route) {
-      details.style.display = 'flex';
-      endpoints.innerText = route;
-      sub.innerText = '• Direct NAT Traversal';
-      sub.style.color = '#22d3ee';
-    }
-  } else {
-    badge.className = 'connection-pill pill-connecting';
-    label.innerText = 'Connecting...';
-    details.style.display = 'none';
-  }
-}
-
-function updateTransferOverlayProgress(p) {
-  const overlay = document.getElementById('transfer-overlay');
-  if (!overlay.classList.contains('active')) {
-    overlay.classList.add('active');
-  }
-
-  const fileTitle = p.totalFiles && p.totalFiles > 1 
-    ? `File ${(p.currentFileIndex || 0) + 1} of ${p.totalFiles}: ${p.currentFileName}`
-    : p.currentFileName || '';
-  document.getElementById('transfer-modal-file').innerText = fileTitle;
-
-  const percent = p.percentage || 0;
-  document.getElementById('transfer-fill').style.width = percent + '%';
-  document.getElementById('transfer-percent').innerText = percent + '%';
-
-  const speedMB = (p.speedBytesPerSec / (1024 * 1024)).toFixed(1);
-  document.getElementById('transfer-speed').innerText = `${speedMB} MB/s`;
-  document.getElementById('transfer-eta').innerText = formatTime(p.etaSeconds);
-  document.getElementById('transfer-bytes').innerText = `${formatBytes(p.transferredBytes)} / ${formatBytes(p.totalBytes)}`;
-}
-
-function onTransferCompleted(peerLabel) {
-  const overlay = document.getElementById('transfer-overlay');
-  document.getElementById('transfer-fill').style.width = '100%';
-  document.getElementById('transfer-percent').innerText = '100%';
-  document.getElementById('transfer-modal-title').innerText = 'Transfer Complete! 🎉';
-
-  addTransferHistoryItem(peerLabel, 0, 'Success');
-
-  setTimeout(() => {
-    overlay.classList.remove('active');
-    hasShownOverlay = false;
-  }, 1600);
-}
-
-function addTransferHistoryItem(title, size, status) {
-  const hist = document.getElementById('transfer-history');
-  if (hist.innerText.includes('No recent')) hist.innerHTML = '';
-  const item = document.createElement('div');
-  item.style.padding = '8px 0';
-  item.style.borderBottom = '1px solid rgba(255,255,255,0.06)';
-  item.style.textAlign = 'left';
-  const sizeText = size > 0 ? ` — ${formatBytes(size)}` : '';
-  item.innerHTML = `<strong>${title}</strong>${sizeText} <span style="color:#10b981; float:right;">${status}</span>`;
-  hist.prepend(item);
-}
-
-// Messages from Native C++ backend
 if (window.chrome && window.chrome.webview) {
   window.chrome.webview.addEventListener('message', (event) => {
     const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
@@ -1063,11 +1112,16 @@ if (window.chrome && window.chrome.webview) {
     if (data.type === 'init_data') {
       if (data.settings) {
         currentSettings = data.settings;
-        document.getElementById('setting-alias').value = currentSettings.alias;
-        document.getElementById('setting-dest-folder').value = currentSettings.destinationFolder;
-        document.getElementById('setting-quick-save').checked = currentSettings.quickSave;
-        document.getElementById('setting-port').value = currentSettings.port;
-        document.getElementById('setting-encryption').checked = currentSettings.encryptionEnabled;
+        const setAlias = document.getElementById('setting-alias');
+        if (setAlias) setAlias.value = currentSettings.alias;
+        const setDest = document.getElementById('setting-dest-folder');
+        if (setDest) setDest.value = currentSettings.destinationFolder;
+        const setQuick = document.getElementById('setting-quick-save');
+        if (setQuick) setQuick.checked = currentSettings.quickSave;
+        const setPort = document.getElementById('setting-port');
+        if (setPort) setPort.value = currentSettings.port;
+        const setEnc = document.getElementById('setting-encryption');
+        if (setEnc) setEnc.checked = currentSettings.encryptionEnabled;
       }
       if (data.localIps && data.localIps.length > 0) {
         localIps = data.localIps;
@@ -1093,45 +1147,43 @@ if (window.chrome && window.chrome.webview) {
     }
     else if (data.type === 'folder_selected') {
       currentSettings.destinationFolder = data.path;
-      document.getElementById('setting-dest-folder').value = data.path;
+      const setDest = document.getElementById('setting-dest-folder');
+      if (setDest) setDest.value = data.path;
       updateLocalServerDisplay();
       sendToCpp('save_settings', { data: currentSettings });
     }
     else if (data.type === 'transfer_event') {
       const ev = data;
       if (ev.eventType === 'progress') {
-        if (!hasShownOverlay) {
-          hasShownOverlay = true;
-          const modalTitle = ev.peerAlias && ev.peerAlias.includes('Receiving') 
-            ? 'Receiving Files...' 
-            : ev.peerAlias && ev.peerAlias.includes('Sending') 
-            ? 'Sending Files...' 
-            : 'Transferring Files...';
-          showTransferOverlay(modalTitle, ev.peerAlias || ev.peerIp);
-          updateModeBadge('lan', `${ev.peerIp}:53317`);
-        }
-        document.getElementById('transfer-modal-file').innerText = ev.currentFileName || '';
-        const pct = ev.progressPercent || 0;
-        document.getElementById('transfer-fill').style.width = pct + '%';
-        document.getElementById('transfer-percent').innerText = pct + '%';
-        document.getElementById('transfer-speed').innerText = (ev.speedMBs || 0).toFixed(1) + ' MB/s';
+        const isReceiving = ev.peerAlias && ev.peerAlias.toLowerCase().includes('receiving');
 
-        // Calculate and display ETA
+        // Automatically switch to Receive tab if incoming file from mobile
+        if (isReceiving) {
+          const receiveNavBtn = document.querySelector('.nav-btn[data-tab="receive"]');
+          if (receiveNavBtn && !receiveNavBtn.classList.contains('active')) {
+            receiveNavBtn.click();
+          }
+        }
+
         const remainingBytes = (ev.totalBytes || 0) - (ev.bytesTransferred || 0);
         const speedBytes = (ev.speedMBs || 0) * 1024 * 1024;
         const etaSec = (speedBytes > 0 && remainingBytes > 0) ? Math.ceil(remainingBytes / speedBytes) : 0;
-        document.getElementById('transfer-eta').innerText = formatTime(etaSec);
 
-        document.getElementById('transfer-bytes').innerText = 
-          formatBytes(ev.bytesTransferred) + ' / ' + formatBytes(ev.totalBytes);
-      } else if (ev.eventType === 'complete') {
-        onTransferCompleted(ev.peerAlias || ev.peerIp);
-      } else if (ev.eventType === 'error') {
-        document.getElementById('transfer-overlay').classList.remove('active');
-        hasShownOverlay = false;
-        if (ev.message && !ev.message.includes('cancelled')) {
-          alert(ev.message || 'Transfer failed.');
-        }
+        updateLiveTransferUI({
+          title: isReceiving ? (ev.peerAlias || 'Receiving File...') : (ev.peerAlias || 'Sending File...'),
+          fileName: ev.currentFileName || 'Transferring...',
+          percentage: ev.progressPercent,
+          transferredBytes: ev.bytesTransferred,
+          totalBytes: ev.totalBytes,
+          speedMBs: ev.speedMBs,
+          etaSeconds: etaSec
+        });
+      }
+      else if (ev.eventType === 'complete') {
+        completeLiveTransferUI(ev.currentFileName || ev.peerAlias || 'File Transfer', ev.totalBytes);
+      }
+      else if (ev.eventType === 'error') {
+        errorLiveTransferUI(ev.message || 'Transfer interrupted');
       }
     }
   });
@@ -1140,4 +1192,5 @@ if (window.chrome && window.chrome.webview) {
 // Request Initial Data on Load
 window.addEventListener('DOMContentLoaded', () => {
   sendToCpp('get_init_data');
+  renderSelectedFiles();
 });
