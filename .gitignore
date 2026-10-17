@@ -1,0 +1,40 @@
+# Visual Studio / MSVC build outputs
+.vs/
+x64/
+x86/
+[Bb]in/
+[Oo]bj/
+Debug/
+Release/
+*.suo
+*.user
+*.useroscan
+*.sln.docstates
+
+# CMake build outputs
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+
+# Intermediate compiled objects & libs
+*.obj
+*.o
+*.lib
+*.a
+*.pdb
+*.ilk
+*.idb
+
+# Preserve vendor packages
+!packages/**
+
+# Executables & Binaries (distribute via GitHub Releases)
+*.exe
+*.dll
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
