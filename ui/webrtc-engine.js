@@ -144,16 +144,28 @@ const ICE_SERVERS = {
 const BUFFER_THRESHOLD = 1024 * 1024; // 1 MB backpressure limit
 const BUFFER_LOW_THRESHOLD = 128 * 1024; // 128 KB low threshold
 
+const isPrivateIp = (ip) =>
+  /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(ip);
+
 class WebRTCManager {
-  constructor(isSender, events = {}, knownLocalIps = []) {
+  constructor(isSender, events = {}, myLocalIps = [], remoteLocalIps = []) {
     this.isSender = isSender;
     this.events = events;
-    this.knownLocalIps = knownLocalIps;
+    this.myLocalIps = myLocalIps || [];
+    this.remoteLocalIps = remoteLocalIps || [];
     this.pc = null;
     this.dc = null;
     this.connectionMode = 'connecting';
+    this.connectionRoute = '';
     this.candidateQueue = [];
     this.remoteDescriptionSet = false;
+  }
+
+  setRemoteLocalIps(ips) {
+    if (ips && Array.isArray(ips)) {
+      this.remoteLocalIps = ips;
+      console.log('[WebRTC LAN Synthesis] Updated remote peer local IPs:', this.remoteLocalIps);
+    }
   }
 
   init() {
@@ -162,16 +174,39 @@ class WebRTCManager {
 
     this.pc.onicecandidate = (event) => {
       if (event.candidate && this.events.onSignal) {
+        // 1. Send genuine candidate
         this.events.onSignal({ candidate: event.candidate.toJSON() });
 
         const candStr = event.candidate.candidate;
-        if (candStr && candStr.includes('typ host') && candStr.includes('.local')) {
-          for (const ip of this.knownLocalIps) {
+        if (!candStr) return;
+
+        // 2. De-anonymize THIS machine's .local mDNS host candidate with OUR real physical LAN IP
+        if (candStr.includes('typ host') && candStr.includes('.local')) {
+          for (const ip of this.myLocalIps) {
             const deAnonymized = candStr.replace(/[\w\-]+\.local/, ip);
-            console.log('[WebRTC LAN Synthesis] Synthesizing direct LAN candidate:', ip);
+            console.log('[WebRTC LAN Synthesis] Emitting de-anonymized direct LAN candidate for this host:', ip);
             this.events.onSignal({
               candidate: {
                 candidate: deAnonymized,
+                sdpMid: event.candidate.sdpMid,
+                sdpMLineIndex: event.candidate.sdpMLineIndex,
+              },
+            });
+          }
+        }
+
+        // 3. If STUN reveals private IP in raddr, emit direct host candidate
+        if (candStr.includes('typ srflx')) {
+          const raddrMatch = candStr.match(/raddr\s+(\d+\.\d+\.\d+\.\d+)/);
+          const rportMatch = candStr.match(/rport\s+(\d+)/);
+          if (raddrMatch && rportMatch && isPrivateIp(raddrMatch[1])) {
+            const synthetic = candStr
+              .replace(/typ srflx/, 'typ host')
+              .replace(/(\d+\.\d+\.\d+\.\d+)\s+(\d+)\s+typ host/, `${raddrMatch[1]} ${rportMatch[1]} typ host`);
+            console.log('[WebRTC LAN Synthesis] Emitting direct LAN candidate from STUN raddr:', raddrMatch[1], rportMatch[1]);
+            this.events.onSignal({
+              candidate: {
+                candidate: synthetic,
                 sdpMid: event.candidate.sdpMid,
                 sdpMLineIndex: event.candidate.sdpMLineIndex,
               },
@@ -216,7 +251,7 @@ class WebRTCManager {
     dc.bufferedAmountLowThreshold = BUFFER_LOW_THRESHOLD;
 
     dc.onopen = () => {
-      console.log('[WebRTC] RTCDataChannel opened');
+      console.log('[WebRTC] RTCDataChannel opened successfully');
       this.events.onDataChannelOpen?.();
       this.detectConnectionMode();
     };
@@ -239,9 +274,10 @@ class WebRTCManager {
     };
   }
 
-  setMode(mode) {
+  setMode(mode, route = '') {
     this.connectionMode = mode;
-    this.events.onConnectionModeChange?.(mode);
+    this.connectionRoute = route;
+    this.events.onConnectionModeChange?.(mode, route);
   }
 
   async detectConnectionMode(attempt = 0) {
@@ -269,28 +305,29 @@ class WebRTCManager {
           const localIp = localCandidate.address || localCandidate.ip || '';
           const remoteIp = remoteCandidate.address || remoteCandidate.ip || '';
 
-          const isLocalSubnet = (ip) =>
-            /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(ip);
+          const routeStr = `${localIp} ⇄ ${remoteIp}`;
+          console.log(`[WebRTC Path Inspection] ${localType}(${localIp}) <-> ${remoteType}(${remoteIp})`);
 
           if (
             (localType === 'host' && remoteType === 'host') ||
-            (isLocalSubnet(localIp) && isLocalSubnet(remoteIp))
+            (isPrivateIp(localIp) && isPrivateIp(remoteIp)) ||
+            (isPrivateIp(remoteIp))
           ) {
-            console.log(`[WebRTC] Direct LAN connection verified (${localIp} <-> ${remoteIp})`);
-            this.setMode('lan');
+            console.log(`[WebRTC] Active connection is DIRECT LAN (Local Wire Speed): ${routeStr}`);
+            this.setMode('lan', routeStr);
             return;
           } else if (localType === 'relay' || remoteType === 'relay') {
-            this.setMode('relay');
+            this.setMode('relay', routeStr);
             return;
           } else {
-            this.setMode('wan');
+            this.setMode('wan', routeStr);
             return;
           }
         }
       }
 
-      if (attempt < 3) {
-        setTimeout(() => this.detectConnectionMode(attempt + 1), 600);
+      if (attempt < 4) {
+        setTimeout(() => this.detectConnectionMode(attempt + 1), 500);
       } else {
         this.setMode('wan');
       }
@@ -337,11 +374,34 @@ class WebRTCManager {
     try {
       await this.pc.addIceCandidate(new RTCIceCandidate(candidateInit));
 
-      if (candidateInit.candidate && candidateInit.candidate.includes('typ host') && candidateInit.candidate.includes('.local')) {
-        for (const ip of this.knownLocalIps) {
-          const deAnonymized = candidateInit.candidate.replace(/[\w\-]+\.local/, ip);
+      const candStr = candidateInit.candidate;
+      if (!candStr) return;
+
+      // 1. If remote peer sent a host candidate with .local, de-anonymize with remote known IPs
+      if (candStr.includes('typ host') && candStr.includes('.local')) {
+        for (const ip of this.remoteLocalIps) {
+          const deAnonymized = candStr.replace(/[\w\-]+\.local/, ip);
+          console.log('[WebRTC LAN Synthesis] Injecting direct LAN IP route for remote peer:', ip);
           await this.pc.addIceCandidate(new RTCIceCandidate({
             candidate: deAnonymized,
+            sdpMid: candidateInit.sdpMid,
+            sdpMLineIndex: candidateInit.sdpMLineIndex,
+          })).catch(() => {});
+        }
+      }
+
+      // 2. Synthesize direct LAN host candidate if STUN candidate reveals private IP in raddr
+      if (candStr.includes('typ srflx')) {
+        const raddrMatch = candStr.match(/raddr\s+(\d+\.\d+\.\d+\.\d+)/);
+        const rportMatch = candStr.match(/rport\s+(\d+)/);
+        if (raddrMatch && rportMatch && isPrivateIp(raddrMatch[1])) {
+          const synthetic = candStr
+            .replace(/typ srflx/, 'typ host')
+            .replace(/(\d+\.\d+\.\d+\.\d+)\s+(\d+)\s+typ host/, `${raddrMatch[1]} ${rportMatch[1]} typ host`);
+          
+          console.log('[WebRTC LAN Synthesis] Injecting direct LAN route from remote STUN raddr:', raddrMatch[1], rportMatch[1]);
+          await this.pc.addIceCandidate(new RTCIceCandidate({
+            candidate: synthetic,
             sdpMid: candidateInit.sdpMid,
             sdpMLineIndex: candidateInit.sdpMLineIndex,
           })).catch(() => {});
@@ -534,7 +594,7 @@ async function sendFilesWebRTC(files, transport, cryptoKey, onProgress, isCancel
       transferredBytes += currentBlock.totalBatchBytes;
 
       const now = Date.now();
-      if (now - lastProgressUpdate > 100 || transferredBytes === totalBytes) {
+      if (now - lastProgressUpdate > 80 || transferredBytes === totalBytes) {
         const timeDiff = (now - lastProgressUpdate) / 1000;
         const bytesDiff = transferredBytes - lastTransferredBytes;
         const instantSpeed = timeDiff > 0 ? bytesDiff / timeDiff : 0;
@@ -552,6 +612,7 @@ async function sendFilesWebRTC(files, transport, cryptoKey, onProgress, isCancel
             totalBytes,
             transferredBytes,
             currentFileIndex: fileIdx,
+            totalFiles: files.length,
             currentFileName: file.name,
             percentage,
             speedBytesPerSec: rollingSpeed,
@@ -619,7 +680,8 @@ class FileReceiverWebRTC {
         this.transferredBytes += decrypted.byteLength;
 
         const now = Date.now();
-        if (now - this.lastUpdate > 100 || this.transferredBytes === this.totalBytes) {
+        // Throttle progress updates to at most once per 80ms to eliminate UI flickering
+        if (now - this.lastUpdate > 80 || this.transferredBytes === this.totalBytes) {
           const timeDiff = (now - this.lastUpdate) / 1000;
           const bytesDiff = this.transferredBytes - this.lastTransferredBytes;
           const instantSpeed = timeDiff > 0 ? bytesDiff / timeDiff : 0;
@@ -640,6 +702,7 @@ class FileReceiverWebRTC {
               totalBytes: this.totalBytes,
               transferredBytes: this.transferredBytes,
               currentFileIndex: fileIndex,
+              totalFiles: this.manifest?.files?.length || 1,
               currentFileName,
               percentage,
               speedBytesPerSec: this.rollingSpeed,

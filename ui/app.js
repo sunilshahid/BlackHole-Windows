@@ -29,6 +29,9 @@ let webrtcReceiverManager = null;
 let receiverEngine = null;
 let isReceiverTransferring = false;
 
+// Overlay State Flag to prevent flickering
+let hasShownOverlay = false;
+
 // Helper to communicate with C++ Win32 Backend
 function sendToCpp(action, data = {}) {
   if (window.chrome && window.chrome.webview) {
@@ -45,6 +48,14 @@ function formatBytes(bytes) {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function formatTime(seconds) {
+  if (!seconds || seconds <= 0 || !isFinite(seconds)) return '0s';
+  if (seconds < 60) return `${Math.ceil(seconds)}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.ceil(seconds % 60);
+  return `${m}m ${s}s`;
 }
 
 // Tab Switching
@@ -93,13 +104,12 @@ dropzone.addEventListener('drop', (e) => {
 
 function addFileObjects(newFiles) {
   newFiles.forEach(f => {
-    // Avoid duplicates
     if (!selectedFileObjects.some(existing => existing.name === f.name && existing.size === f.size)) {
       selectedFileObjects.push(f);
       selectedFiles.push({
         name: f.name,
         size: f.size,
-        path: f.path || f.name // On WebView2/Chromium, f.path may be set or f.name
+        path: f.path || f.name
       });
     }
   });
@@ -207,6 +217,7 @@ function stopWebRTCShareSession() {
   senderCancelled = true;
   isSenderTransferring = false;
   p2pEstablished = false;
+  hasShownOverlay = false;
 
   if (webrtcSenderWS) {
     try { webrtcSenderWS.close(); } catch {}
@@ -226,6 +237,7 @@ function stopWebRTCShareSession() {
 function startWebRTCShareSession() {
   stopWebRTCShareSession();
   senderCancelled = false;
+  hasShownOverlay = false;
 
   webShareIdle.style.display = 'none';
   webShareActive.style.display = 'flex';
@@ -283,27 +295,36 @@ function startWebRTCShareSession() {
           });
         }
 
-        // Initialize WebRTC Manager as Sender
-        initWebRTCSender(msg.code, ws, msg.localIps || localIps);
+        // Initialize WebRTC Manager as Sender with OUR physical local IPs
+        initWebRTCSender(msg.code, ws, localIps);
       }
       else if (msg.type === 'peer-joined') {
-        webShareStatus.innerText = 'Receiver connected! Opening secure tunnel...';
+        webShareStatus.innerText = 'Receiver connected! Opening direct secure tunnel...';
+
+        // Share our real local IP addresses with the peer
+        if (ws.readyState === WebSocket.OPEN && localIps.length > 0) {
+          ws.send(JSON.stringify({ type: 'signal', data: { peerLocalIps: localIps } }));
+        }
 
         if (webrtcSenderManager) {
           const offer = await webrtcSenderManager.createOffer();
-          ws.send(JSON.stringify({ type: 'signal', data: { sdp: offer } }));
+          ws.send(JSON.stringify({ type: 'signal', data: { sdp: offer, peerLocalIps: localIps } }));
         }
 
-        // Fallback to relay after 8 seconds if direct P2P does not open
+        // Fallback to relay only after 12 seconds if direct P2P does not open
         clearTimeout(relayFallbackTimeout);
         relayFallbackTimeout = setTimeout(() => {
           if (!p2pEstablished && !isSenderTransferring) {
             console.log('[WebRTC Sender] P2P timeout. Switching to Encrypted WebSocket Relay...');
             startRelaySender(currentSenderCode);
           }
-        }, 8000);
+        }, 12000);
       }
       else if (msg.type === 'signal') {
+        if (msg.data?.peerLocalIps) {
+          webrtcSenderManager?.setRemoteLocalIps(msg.data.peerLocalIps);
+        }
+
         if (msg.data?.requestRelay) {
           if (!p2pEstablished) {
             startRelaySender(currentSenderCode);
@@ -327,10 +348,10 @@ function startWebRTCShareSession() {
   }
 }
 
-function initWebRTCSender(code, ws, knownIps) {
+function initWebRTCSender(code, ws, myIps) {
   const webrtc = new WebRTCManager(true, {
-    onConnectionModeChange: (mode) => {
-      updateModeBadge(mode);
+    onConnectionModeChange: (mode, route) => {
+      updateModeBadge(mode, route);
     },
     onSignal: (data) => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -379,7 +400,7 @@ function initWebRTCSender(code, ws, knownIps) {
         startRelaySender(code);
       }
     }
-  }, knownIps);
+  }, myIps);
 
   webrtc.init();
   webrtcSenderManager = webrtc;
@@ -414,7 +435,7 @@ async function startRelaySender(code) {
   if (!webrtcSenderWS || webrtcSenderWS.readyState !== WebSocket.OPEN) return;
   clearTimeout(relayFallbackTimeout);
 
-  updateModeBadge('relay');
+  updateModeBadge('relay', 'Cloud Relay Fallback');
   webShareStatus.innerText = 'Connected via Encrypted Relay. Streaming...';
   showTransferOverlay('Streaming via Encrypted Relay...', 'Web Client');
 
@@ -480,6 +501,7 @@ btnConnectCode.addEventListener('click', () => {
 });
 
 function startWebRTCReceiverSession(code) {
+  hasShownOverlay = false;
   receiveStatusMsg.style.display = 'block';
   receiveStatusMsg.innerText = `Connecting to room [${code}]...`;
   btnConnectCode.disabled = true;
@@ -499,11 +521,9 @@ function startWebRTCReceiverSession(code) {
           updateTransferOverlayProgress(p);
         },
         (file) => {
-          // File received! Trigger auto-download (which C++ DownloadStarting saves to destinationFolder)
           triggerFileSave(file);
         },
         () => {
-          // Transfer Complete!
           onTransferCompleted(`Sender [${code}]`);
           try {
             const ack = encodeControlPacket({ type: 'TRANSFER_ACK' });
@@ -516,8 +536,8 @@ function startWebRTCReceiverSession(code) {
     });
 
     const webrtc = new WebRTCManager(false, {
-      onConnectionModeChange: (mode) => {
-        updateModeBadge(mode);
+      onConnectionModeChange: (mode, route) => {
+        updateModeBadge(mode, route);
       },
       onSignal: (data) => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -526,9 +546,16 @@ function startWebRTCReceiverSession(code) {
       },
       onDataChannelOpen: () => {
         receiveStatusMsg.innerText = 'Connected! Receiving stream...';
-        showTransferOverlay('Receiving Files via WebRTC...', `Sender [${code}]`);
+        if (!hasShownOverlay) {
+          hasShownOverlay = true;
+          showTransferOverlay('Receiving Files via WebRTC...', `Sender [${code}]`);
+        }
       },
       onDataReceived: (buffer) => {
+        if (!hasShownOverlay) {
+          hasShownOverlay = true;
+          showTransferOverlay('Receiving Files via WebRTC...', `Sender [${code}]`);
+        }
         if (receiverEngine) {
           receiverEngine.handlePacket(buffer);
         } else {
@@ -548,8 +575,13 @@ function startWebRTCReceiverSession(code) {
     ws.onmessage = async (event) => {
       // Binary packet over WebSocket relay
       if (event.data instanceof ArrayBuffer) {
-        showTransferOverlay('Receiving Files via Relay...', `Sender [${code}]`);
-        updateModeBadge('relay');
+        // ONLY call showTransferOverlay once! Never call on every chunk to avoid flickering!
+        if (!hasShownOverlay) {
+          hasShownOverlay = true;
+          showTransferOverlay('Receiving Files via Relay...', `Sender [${code}]`);
+          updateModeBadge('relay', 'Cloud Relay Fallback');
+        }
+
         if (receiverEngine) {
           receiverEngine.handlePacket(event.data);
         } else {
@@ -566,17 +598,29 @@ function startWebRTCReceiverSession(code) {
       }
 
       if (msg.type === 'room-joined') {
-        receiveStatusMsg.innerText = 'Room joined! Establishing P2P data tunnel...';
+        receiveStatusMsg.innerText = 'Room joined! Exchanging local Wi-Fi routes...';
+
+        // Share our real local IP addresses with the peer
+        if (ws.readyState === WebSocket.OPEN && localIps.length > 0) {
+          ws.send(JSON.stringify({ type: 'signal', data: { peerLocalIps: localIps } }));
+        }
       }
       else if (msg.type === 'signal') {
+        if (msg.data?.peerLocalIps) {
+          webrtc.setRemoteLocalIps(msg.data.peerLocalIps);
+        }
+
         if (msg.data?.switchToRelay) {
-          updateModeBadge('relay');
+          updateModeBadge('relay', 'Cloud Relay Fallback');
           receiveStatusMsg.innerText = 'Connected via Encrypted Relay!';
-          showTransferOverlay('Receiving via Encrypted Relay...', `Sender [${code}]`);
+          if (!hasShownOverlay) {
+            hasShownOverlay = true;
+            showTransferOverlay('Receiving via Encrypted Relay...', `Sender [${code}]`);
+          }
         } else if (msg.data?.sdp) {
           if (msg.data.sdp.type === 'offer') {
             const answer = await webrtc.createAnswer(msg.data.sdp);
-            ws.send(JSON.stringify({ type: 'signal', data: { sdp: answer } }));
+            ws.send(JSON.stringify({ type: 'signal', data: { sdp: answer, peerLocalIps: localIps } }));
           }
         } else if (msg.data?.candidate) {
           await webrtc.handleCandidate(msg.data.candidate);
@@ -601,8 +645,6 @@ function startWebRTCReceiverSession(code) {
 
 // Save Received File directly to disk
 function triggerFileSave(receivedFile) {
-  // 1. Programmatically trigger link download
-  // In WebView2, this fires C++ DownloadStarting, which puts resultFilePath into destinationFolder!
   try {
     const a = document.createElement('a');
     a.href = receivedFile.downloadUrl;
@@ -614,7 +656,6 @@ function triggerFileSave(receivedFile) {
     console.warn('[Auto-Download Failed]', e);
   }
 
-  // 2. Also send binary base64 to C++ for direct file write if under 50 MB
   if (receivedFile.blob.size < 50 * 1024 * 1024) {
     const reader = new FileReader();
     reader.onload = () => {
@@ -627,7 +668,6 @@ function triggerFileSave(receivedFile) {
     reader.readAsDataURL(receivedFile.blob);
   }
 
-  // Add to transfer history
   addTransferHistoryItem(receivedFile.metadata.name, receivedFile.metadata.size, 'Success');
 }
 
@@ -635,7 +675,6 @@ function triggerFileSave(receivedFile) {
 // 📡 NATIVE OFFLINE UDP / TCP RADAR & SETTINGS
 // ========================================================
 
-// Render Discovered Peers
 function renderPeers() {
   const grid = document.getElementById('peer-grid');
   grid.innerHTML = '';
@@ -727,6 +766,7 @@ document.getElementById('btn-save-settings').addEventListener('click', () => {
 document.getElementById('btn-cancel-transfer').addEventListener('click', () => {
   sendToCpp('cancel_transfer');
   stopWebRTCShareSession();
+  hasShownOverlay = false;
   document.getElementById('transfer-overlay').classList.remove('active');
 });
 
@@ -741,35 +781,71 @@ function showTransferOverlay(title, peerName) {
   document.getElementById('transfer-fill').style.width = '0%';
   document.getElementById('transfer-percent').innerText = '0%';
   document.getElementById('transfer-speed').innerText = '0.0 MB/s';
-  document.getElementById('transfer-bytes').innerText = '0 / 0 MB';
+  document.getElementById('transfer-eta').innerText = '--';
+  document.getElementById('transfer-bytes').innerText = '0 B / 0 B';
 }
 
-function updateModeBadge(mode) {
+function updateModeBadge(mode, route = '') {
   const badge = document.getElementById('transfer-mode-badge');
+  const label = document.getElementById('route-label');
+  const details = document.getElementById('route-details');
+  const endpoints = document.getElementById('route-endpoints');
+  const sub = document.getElementById('route-sub');
+
   if (!badge) return;
 
   if (mode === 'lan') {
     badge.className = 'connection-pill pill-lan';
-    badge.innerText = '⚡ Direct LAN Wire Speed (0 Internet Bandwidth)';
+    label.innerText = 'Direct LAN Wire Speed';
+    if (route) {
+      details.style.display = 'flex';
+      endpoints.innerText = route;
+      sub.innerText = '• Zero Internet Bandwidth';
+      sub.style.color = '#34d399';
+    }
   } else if (mode === 'relay') {
     badge.className = 'connection-pill pill-relay';
-    badge.innerText = '🛡️ Encrypted WebSocket Relay';
+    label.innerText = 'Encrypted WebSocket Relay';
+    if (route) {
+      details.style.display = 'flex';
+      endpoints.innerText = route;
+      sub.innerText = '• Cloud Relay Tunnel';
+      sub.style.color = '#fbbf24';
+    }
   } else if (mode === 'wan') {
     badge.className = 'connection-pill pill-wan';
-    badge.innerText = '🌐 Internet WAN P2P';
+    label.innerText = 'Internet WAN P2P';
+    if (route) {
+      details.style.display = 'flex';
+      endpoints.innerText = route;
+      sub.innerText = '• Direct NAT Traversal';
+      sub.style.color = '#22d3ee';
+    }
   } else {
     badge.className = 'connection-pill pill-connecting';
-    badge.innerText = 'Connecting...';
+    label.innerText = 'Connecting...';
+    details.style.display = 'none';
   }
 }
 
 function updateTransferOverlayProgress(p) {
-  document.getElementById('transfer-overlay').classList.add('active');
-  document.getElementById('transfer-modal-file').innerText = p.currentFileName || '';
-  document.getElementById('transfer-fill').style.width = (p.percentage || 0) + '%';
-  document.getElementById('transfer-percent').innerText = (p.percentage || 0) + '%';
+  const overlay = document.getElementById('transfer-overlay');
+  if (!overlay.classList.contains('active')) {
+    overlay.classList.add('active');
+  }
+
+  const fileTitle = p.totalFiles && p.totalFiles > 1 
+    ? `File ${(p.currentFileIndex || 0) + 1} of ${p.totalFiles}: ${p.currentFileName}`
+    : p.currentFileName || '';
+  document.getElementById('transfer-modal-file').innerText = fileTitle;
+
+  const percent = p.percentage || 0;
+  document.getElementById('transfer-fill').style.width = percent + '%';
+  document.getElementById('transfer-percent').innerText = percent + '%';
+
   const speedMB = (p.speedBytesPerSec / (1024 * 1024)).toFixed(1);
   document.getElementById('transfer-speed').innerText = `${speedMB} MB/s`;
+  document.getElementById('transfer-eta').innerText = formatTime(p.etaSeconds);
   document.getElementById('transfer-bytes').innerText = `${formatBytes(p.transferredBytes)} / ${formatBytes(p.totalBytes)}`;
 }
 
@@ -783,6 +859,7 @@ function onTransferCompleted(peerLabel) {
 
   setTimeout(() => {
     overlay.classList.remove('active');
+    hasShownOverlay = false;
   }, 1600);
 }
 
@@ -843,8 +920,11 @@ if (window.chrome && window.chrome.webview) {
     else if (data.type === 'transfer_event') {
       const ev = data;
       if (ev.eventType === 'progress') {
-        document.getElementById('transfer-overlay').classList.add('active');
-        document.getElementById('transfer-modal-title').innerText = 'Transferring Files...';
+        if (!hasShownOverlay) {
+          hasShownOverlay = true;
+          showTransferOverlay('Transferring Files...', ev.peerAlias || ev.peerIp);
+          updateModeBadge('lan', `${ev.peerIp}:53317`);
+        }
         document.getElementById('transfer-modal-file').innerText = ev.currentFileName || '';
         document.getElementById('transfer-fill').style.width = (ev.progressPercent || 0) + '%';
         document.getElementById('transfer-percent').innerText = (ev.progressPercent || 0) + '%';
@@ -856,6 +936,7 @@ if (window.chrome && window.chrome.webview) {
       } else if (ev.eventType === 'error') {
         alert(ev.message || 'Transfer failed.');
         document.getElementById('transfer-overlay').classList.remove('active');
+        hasShownOverlay = false;
       }
     }
   });
