@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <!-- Background Space Glow -->
+    <radialGradient id="spaceGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.6"/>
+      <stop offset="50%" stop-color="#06b6d4" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#030712" stop-opacity="0"/>
+    </radialGradient>
+    
+    <!-- Accretion Disk Gradient -->
+    <linearGradient id="accretionGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="40%" stop-color="#8b5cf6"/>
+      <stop offset="70%" stop-color="#ec4899"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+
+    <!-- Photon Sphere Ring -->
+    <linearGradient id="photonRing" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f43f5e"/>
+      <stop offset="50%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+
+    <!-- Event Horizon Shadow -->
+    <radialGradient id="eventHorizon" cx="50%" cy="50%" r="50%">
+      <stop offset="70%" stop-color="#020617"/>
+      <stop offset="95%" stop-color="#090d16"/>
+      <stop offset="100%" stop-color="#3b0764" stop-opacity="0.8"/>
+    </radialGradient>
+
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Ambient Glow -->
+  <circle cx="50" cy="50" r="48" fill="url(#spaceGlow)"/>
+
+  <!-- Swirling Gravitational Lensing Disk (Back) -->
+  <ellipse cx="50" cy="50" rx="42" ry="14" transform="rotate(-28 50 50)" stroke="url(#accretionGrad)" stroke-width="5" stroke-dasharray="140 40" stroke-linecap="round" opacity="0.9" filter="url(#glow)"/>
+  
+  <ellipse cx="50" cy="50" rx="36" ry="10" transform="rotate(-28 50 50)" stroke="#38bdf8" stroke-width="2" opacity="0.8"/>
+
+  <!-- Relativistic Lensing Arcs -->
+  <path d="M 22 40 C 32 20, 68 20, 78 40" stroke="url(#photonRing)" stroke-width="3.5" stroke-linecap="round" opacity="0.9" filter="url(#glow)"/>
+  <path d="M 28 62 C 38 78, 62 78, 72 62" stroke="url(#photonRing)" stroke-width="2.5" stroke-linecap="round" opacity="0.7"/>
+
+  <!-- Event Horizon (The Black Hole Core) -->
+  <circle cx="50" cy="50" r="22" fill="url(#eventHorizon)"/>
+  <circle cx="50" cy="50" r="22" stroke="url(#photonRing)" stroke-width="1.8" opacity="0.9"/>
+
+  <!-- Foreground Accretion Stream -->
+  <path d="M 18 56 C 26 66, 68 58, 82 44" stroke="url(#accretionGrad)" stroke-width="6" stroke-linecap="round" filter="url(#glow)"/>
+  <path d="M 26 55 C 34 62, 60 56, 76 46" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" opacity="0.8"/>
+
+  <!-- Central Singularity Pure Black Pin -->
+  <circle cx="50" cy="50" r="16" fill="#000000"/>
+</svg>

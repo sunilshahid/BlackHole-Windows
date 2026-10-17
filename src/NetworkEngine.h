@@ -83,12 +83,20 @@ public:
     bool sendFilesToPeer(const std::string& peerIp, int peerPort, const std::vector<std::string>& filePaths);
     void cancelTransfer();
 
+    // Local Web Link Sharing (Bidirectional Local HTTP Server)
+    void setSharedFiles(const std::vector<std::string>& files);
+    std::vector<std::string> getSharedFiles();
+
 private:
     void runUdpBroadcaster();
     void runUdpListener();
     void runTcpServer();
     void handleIncomingConnection(uintptr_t clientSock, std::string clientIp);
+    void handleHttpRequest(uintptr_t clientSock, const std::string& clientIp);
     int64_t getCurrentTimeMs();
+
+    std::vector<std::string> sharedFiles;
+    std::mutex sharedFilesMutex;
 };
 
 } // namespace BlackHole

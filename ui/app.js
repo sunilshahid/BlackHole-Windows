@@ -58,15 +58,15 @@ function formatTime(seconds) {
   return `${m}m ${s}s`;
 }
 
-// Tab Switching
-document.querySelectorAll('.tab-btn').forEach(btn => {
+// Tab Switching (Sidebar Rail)
+document.querySelectorAll('.nav-btn, .tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('.nav-btn, .tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane, .tab-content').forEach(c => c.classList.remove('active'));
 
     btn.classList.add('active');
-    const tabId = 'tab-' + btn.getAttribute('data-tab');
-    const target = document.getElementById(tabId);
+    const tabName = btn.getAttribute('data-tab');
+    const target = document.getElementById('tab-' + tabName);
     if (target) target.classList.add('active');
   });
 });
@@ -75,32 +75,95 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 const dropzone = document.getElementById('dropzone');
 const filePicker = document.getElementById('file-picker');
 
-dropzone.addEventListener('click', () => {
-  filePicker.click();
-});
+if (dropzone) {
+  dropzone.addEventListener('click', () => {
+    sendToCpp('browse_files');
+  });
 
-filePicker.addEventListener('change', (e) => {
-  if (e.target.files && e.target.files.length > 0) {
-    addFileObjects(Array.from(e.target.files));
+  dropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropzone.classList.add('dragover');
+  });
+
+  dropzone.addEventListener('dragleave', () => {
+    dropzone.classList.remove('dragover');
+  });
+
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      addFileObjects(Array.from(e.dataTransfer.files));
+    }
+  });
+}
+
+if (filePicker) {
+  filePicker.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      addFileObjects(Array.from(e.target.files));
+    }
+  });
+}
+
+// Selection Action Tiles (LocalSend Style)
+const tileFile = document.getElementById('tile-file');
+const tileFolder = document.getElementById('tile-folder');
+const tilePaste = document.getElementById('tile-paste');
+const tileClear = document.getElementById('tile-clear');
+const btnClearSelection = document.getElementById('btn-clear-selection');
+
+if (tileFile) {
+  tileFile.addEventListener('click', () => {
+    sendToCpp('browse_files');
+  });
+}
+
+if (tileFolder) {
+  tileFolder.addEventListener('click', () => {
+    sendToCpp('browse_folder_files');
+  });
+}
+
+if (tilePaste) {
+  tilePaste.addEventListener('click', async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim().length > 0) {
+          const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+          const file = new File([blob], `clipboard_${Date.now()}.txt`, { type: 'text/plain' });
+          addFileObjects([file]);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Clipboard read error:', err);
+    }
+  });
+}
+
+if (tileClear) {
+  tileClear.addEventListener('click', () => {
+    clearAllFiles();
+  });
+}
+
+if (btnClearSelection) {
+  btnClearSelection.addEventListener('click', () => {
+    clearAllFiles();
+  });
+}
+
+function syncSharedFilesToCpp() {
+  const paths = selectedFiles.map(f => f.path).filter(p => !!p);
+  sendToCpp('set_shared_files', { files: paths });
+  
+  const statusEl = document.getElementById('shared-files-status');
+  if (statusEl) {
+    statusEl.innerText = `${selectedFiles.length} file(s) staged for phone download`;
   }
-});
-
-dropzone.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  dropzone.classList.add('dragover');
-});
-
-dropzone.addEventListener('dragleave', () => {
-  dropzone.classList.remove('dragover');
-});
-
-dropzone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropzone.classList.remove('dragover');
-  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-    addFileObjects(Array.from(e.dataTransfer.files));
-  }
-});
+}
 
 function addFileObjects(newFiles) {
   newFiles.forEach(f => {
@@ -118,24 +181,32 @@ function addFileObjects(newFiles) {
 
 function renderSelectedFiles() {
   const container = document.getElementById('selected-files-list');
+  const cardContainer = document.getElementById('selected-files-container');
+  const summaryEl = document.getElementById('selected-files-summary');
+  const tileClearEl = document.getElementById('tile-clear');
+  const badgeEl = document.getElementById('selection-summary-badge');
+  const countTextEl = document.getElementById('selection-count-text');
+
+  if (!container) return;
   container.innerHTML = '';
 
-  if (selectedFiles.length === 0) return;
+  if (selectedFiles.length === 0) {
+    if (cardContainer) cardContainer.style.display = 'none';
+    if (tileClearEl) tileClearEl.style.display = 'none';
+    if (badgeEl) badgeEl.style.display = 'none';
+    syncSharedFilesToCpp();
+    return;
+  }
+
+  if (cardContainer) cardContainer.style.display = 'block';
+  if (tileClearEl) tileClearEl.style.display = 'flex';
+  if (badgeEl) badgeEl.style.display = 'inline-block';
+  if (countTextEl) countTextEl.innerText = `${selectedFiles.length} files`;
 
   const totalBytes = selectedFiles.reduce((acc, f) => acc + (f.size || 0), 0);
-
-  const header = document.createElement('div');
-  header.style.display = 'flex';
-  header.style.justifyContent = 'space-between';
-  header.style.alignItems = 'center';
-  header.style.padding = '8px 4px';
-  header.style.fontSize = '0.85rem';
-  header.style.color = 'var(--text-secondary)';
-  header.innerHTML = `
-    <span><strong>${selectedFiles.length}</strong> file(s) selected (${formatBytes(totalBytes)})</span>
-    <span style="cursor: pointer; color: #ef4444;" onclick="clearAllFiles()">Clear All</span>
-  `;
-  container.appendChild(header);
+  if (summaryEl) {
+    summaryEl.innerText = `${selectedFiles.length} file(s) selected (${formatBytes(totalBytes)})`;
+  }
 
   selectedFiles.forEach((f, idx) => {
     const item = document.createElement('div');
@@ -144,11 +215,13 @@ function renderSelectedFiles() {
       <div class="file-name" title="${f.name}">${f.name}</div>
       <div style="display: flex; align-items: center; gap: 10px;">
         <span class="file-size">${formatBytes(f.size)}</span>
-        <span style="cursor: pointer; color: #ef4444; font-weight: bold;" onclick="removeSelectedFile(${idx})">✕</span>
+        <button class="file-remove-btn" title="Remove" onclick="removeSelectedFile(${idx})">✕</button>
       </div>
     `;
     container.appendChild(item);
   });
+
+  syncSharedFilesToCpp();
 }
 
 window.removeSelectedFile = function(idx) {
@@ -675,14 +748,120 @@ function triggerFileSave(receivedFile) {
 // 📡 NATIVE OFFLINE UDP / TCP RADAR & SETTINGS
 // ========================================================
 
+let localQrInstance = null;
+
+function updateLocalServerDisplay() {
+  const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
+  const port = currentSettings.port || 53317;
+  const localUrl = `http://${ip}:${port}`;
+
+  const serverUrlEl = document.getElementById('local-server-url');
+  if (serverUrlEl) serverUrlEl.innerText = localUrl;
+
+  const receivePortalEl = document.getElementById('receive-portal-url');
+  if (receivePortalEl) receivePortalEl.innerText = localUrl;
+
+  const headerIpEl = document.getElementById('header-ip');
+  if (headerIpEl) headerIpEl.innerText = ip;
+
+  const sidebarAliasEl = document.getElementById('sidebar-alias');
+  if (sidebarAliasEl) sidebarAliasEl.innerText = currentSettings.alias;
+
+  const receiveAliasEl = document.getElementById('receive-alias-label');
+  if (receiveAliasEl) receiveAliasEl.innerText = currentSettings.alias;
+
+  const receiveFolderEl = document.getElementById('receive-folder-display');
+  if (receiveFolderEl) receiveFolderEl.innerText = currentSettings.destinationFolder;
+}
+
+// Local QR Code toggle
+const btnToggleLocalQr = document.getElementById('btn-toggle-local-qr');
+const btnToggleLocalQrText = document.getElementById('btn-toggle-local-qr-text');
+const localQrBox = document.getElementById('local-qr-box');
+const localQrContainer = document.getElementById('local-qrcode-container');
+
+if (btnToggleLocalQr) {
+  btnToggleLocalQr.addEventListener('click', () => {
+    if (localQrBox.style.display === 'none') {
+      localQrBox.style.display = 'flex';
+      btnToggleLocalQrText.innerText = 'Hide QR';
+
+      const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
+      const port = currentSettings.port || 53317;
+      const localUrl = `http://${ip}:${port}`;
+
+      if (localQrContainer) {
+        localQrContainer.innerHTML = '';
+        if (typeof QRCode !== 'undefined') {
+          localQrInstance = new QRCode(localQrContainer, {
+            text: localUrl,
+            width: 140,
+            height: 140,
+            colorDark: '#09090b',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.M
+          });
+        }
+      }
+    } else {
+      localQrBox.style.display = 'none';
+      btnToggleLocalQrText.innerText = 'Show QR';
+    }
+  });
+}
+
+// Copy Local URL buttons
+const btnCopyLocalLink = document.getElementById('btn-copy-local-link');
+if (btnCopyLocalLink) {
+  btnCopyLocalLink.addEventListener('click', () => {
+    const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
+    const localUrl = `http://${ip}:${currentSettings.port || 53317}`;
+    navigator.clipboard.writeText(localUrl);
+    btnCopyLocalLink.innerText = 'Copied! ✓';
+    setTimeout(() => { btnCopyLocalLink.innerText = 'Copy Link'; }, 1800);
+  });
+}
+
+const btnReceiveCopyPortal = document.getElementById('btn-receive-copy-portal');
+if (btnReceiveCopyPortal) {
+  btnReceiveCopyPortal.addEventListener('click', () => {
+    const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
+    const localUrl = `http://${ip}:${currentSettings.port || 53317}`;
+    navigator.clipboard.writeText(localUrl);
+    btnReceiveCopyPortal.innerText = 'Copied! ✓';
+    setTimeout(() => { btnReceiveCopyPortal.innerText = 'Copy Link'; }, 1800);
+  });
+}
+
+// Open in Browser buttons
+const btnOpenLocalBrowser = document.getElementById('btn-open-local-browser');
+if (btnOpenLocalBrowser) {
+  btnOpenLocalBrowser.addEventListener('click', () => {
+    const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
+    const localUrl = `http://${ip}:${currentSettings.port || 53317}`;
+    sendToCpp('open_url', { url: localUrl });
+  });
+}
+
+const btnReceiveOpenPortal = document.getElementById('btn-receive-open-portal');
+if (btnReceiveOpenPortal) {
+  btnReceiveOpenPortal.addEventListener('click', () => {
+    const ip = (localIps && localIps.length > 0) ? localIps[0] : '127.0.0.1';
+    const localUrl = `http://${ip}:${currentSettings.port || 53317}`;
+    sendToCpp('open_url', { url: localUrl });
+  });
+}
+
 function renderPeers() {
   const grid = document.getElementById('peer-grid');
+  if (!grid) return;
   grid.innerHTML = '';
 
   if (!activePeers || activePeers.length === 0) {
     grid.innerHTML = `
       <div class="no-peers">
-        Searching for nearby BlackHole devices on your Hotspot / Wi-Fi...
+        <span class="radar-dot"></span>
+        Scanning local network for BlackHole devices...
       </div>
     `;
     return;
@@ -691,17 +870,18 @@ function renderPeers() {
   activePeers.forEach(peer => {
     const card = document.createElement('div');
     card.className = 'peer-card';
-    const initial = (peer.alias && peer.alias.length > 0) ? peer.alias[0].toUpperCase() : 'P';
 
     card.innerHTML = `
-      <div class="peer-info">
-        <div class="peer-avatar">${initial}</div>
-        <div class="peer-details">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(139,92,246,0.15); display: flex; align-items: center; justify-content: center; color: #a855f7;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+        </div>
+        <div class="peer-info">
           <h4>${peer.alias || 'Device'}</h4>
           <span>${peer.ip}:${peer.port}</span>
         </div>
       </div>
-      <button class="send-action-btn" onclick="sendToPeer('${peer.ip}', ${peer.port})">
+      <button class="btn-primary-gradient" style="padding: 6px 14px; font-size: 0.82rem;" onclick="sendToPeer('${peer.ip}', ${peer.port})">
         Send
       </button>
     `;
@@ -884,7 +1064,6 @@ if (window.chrome && window.chrome.webview) {
       if (data.settings) {
         currentSettings = data.settings;
         document.getElementById('setting-alias').value = currentSettings.alias;
-        document.getElementById('receive-alias-label').innerText = currentSettings.alias;
         document.getElementById('setting-dest-folder').value = currentSettings.destinationFolder;
         document.getElementById('setting-quick-save').checked = currentSettings.quickSave;
         document.getElementById('setting-port').value = currentSettings.port;
@@ -892,8 +1071,8 @@ if (window.chrome && window.chrome.webview) {
       }
       if (data.localIps && data.localIps.length > 0) {
         localIps = data.localIps;
-        document.getElementById('header-ip').innerText = localIps[0];
       }
+      updateLocalServerDisplay();
       if (data.peers) {
         activePeers = data.peers;
         renderPeers();
@@ -915,6 +1094,7 @@ if (window.chrome && window.chrome.webview) {
     else if (data.type === 'folder_selected') {
       currentSettings.destinationFolder = data.path;
       document.getElementById('setting-dest-folder').value = data.path;
+      updateLocalServerDisplay();
       sendToCpp('save_settings', { data: currentSettings });
     }
     else if (data.type === 'transfer_event') {

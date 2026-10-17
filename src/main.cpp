@@ -247,6 +247,40 @@ static void HandleWebMessage(const std::string& msgJson) {
             }
         }
     }
+    else if (action == "set_shared_files") {
+        BlackHole::JsonValue filesVal = req.get("files");
+        std::vector<std::string> filePaths;
+        for (auto const& f : filesVal.arrVal) {
+            filePaths.push_back(f.asString());
+        }
+        g_network->setSharedFiles(filePaths);
+    }
+    else if (action == "browse_folder_files") {
+        std::string chosen = BrowseForFolder(g_hWnd);
+        if (!chosen.empty()) {
+            BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
+            resp.set("type", "files_selected");
+            BlackHole::JsonValue arr = BlackHole::JsonValue::Array();
+            std::error_code ec;
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(chosen, ec)) {
+                if (entry.is_regular_file(ec)) {
+                    BlackHole::JsonValue fObj = BlackHole::JsonValue::Object();
+                    fObj.set("path", entry.path().string());
+                    fObj.set("name", entry.path().filename().string());
+                    fObj.set("size", static_cast<int64_t>(entry.file_size(ec)));
+                    arr.push(fObj);
+                }
+            }
+            resp.set("files", arr);
+            PostJsonToWebview(resp.serialize());
+        }
+    }
+    else if (action == "open_url") {
+        std::string url = req.get("url").asString();
+        if (!url.empty()) {
+            ShellExecuteA(NULL, "open", url.c_str(), NULL, NULL, SW_SHOW);
+        }
+    }
 }
 
 // Window Procedure

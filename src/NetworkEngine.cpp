@@ -9,6 +9,7 @@
 #include <fstream>
 #include <filesystem>
 #include <iostream>
+#include <sstream>
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "iphlpapi.lib")
@@ -265,6 +266,20 @@ void NetworkEngine::runTcpServer() {
 
 void NetworkEngine::handleIncomingConnection(uintptr_t clientSockRaw, std::string clientIp) {
     SOCKET sock = static_cast<SOCKET>(clientSockRaw);
+
+    // 0. Peek first 4 bytes to detect HTTP requests from browsers/phones
+    char peekBuf[4] = {0};
+    int p = recv(sock, peekBuf, 4, MSG_PEEK);
+    if (p < 4) {
+        closesocket(sock);
+        return;
+    }
+
+    if (memcmp(peekBuf, "GET ", 4) == 0 || memcmp(peekBuf, "POST", 4) == 0 ||
+        memcmp(peekBuf, "HEAD", 4) == 0 || memcmp(peekBuf, "OPTI", 4) == 0) {
+        handleHttpRequest(clientSockRaw, clientIp);
+        return;
+    }
 
     // 1. Read 4 bytes: header length (Network Byte Order)
     uint32_t headerLenNet = 0;
@@ -601,6 +616,291 @@ bool NetworkEngine::sendFilesToPeer(const std::string& peerIp, int peerPort, con
     });
 
     return true;
+}
+
+void NetworkEngine::setSharedFiles(const std::vector<std::string>& files) {
+    std::lock_guard<std::mutex> lock(sharedFilesMutex);
+    sharedFiles = files;
+}
+
+std::vector<std::string> NetworkEngine::getSharedFiles() {
+    std::lock_guard<std::mutex> lock(sharedFilesMutex);
+    return sharedFiles;
+}
+
+static std::string HttpUrlDecode(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        if (in[i] == '%' && i + 2 < in.size()) {
+            int val = 0;
+            std::istringstream is(in.substr(i + 1, 2));
+            if (is >> std::hex >> val) {
+                out += static_cast<char>(val);
+                i += 2;
+            } else {
+                out += in[i];
+            }
+        } else if (in[i] == '+') {
+            out += ' ';
+        } else {
+            out += in[i];
+        }
+    }
+    return out;
+}
+
+void NetworkEngine::handleHttpRequest(uintptr_t clientSockRaw, const std::string& clientIp) {
+    SOCKET sock = static_cast<SOCKET>(clientSockRaw);
+
+    std::string headerData;
+    char buf[1024];
+    size_t headerEndPos = std::string::npos;
+
+    while (headerData.size() < 65536) {
+        int r = recv(sock, buf, sizeof(buf), 0);
+        if (r <= 0) break;
+        headerData.append(buf, r);
+        headerEndPos = headerData.find("\r\n\r\n");
+        if (headerEndPos != std::string::npos) break;
+    }
+
+    if (headerEndPos == std::string::npos) {
+        closesocket(sock);
+        return;
+    }
+
+    std::string headersPart = headerData.substr(0, headerEndPos);
+    std::string bodyInitial = headerData.substr(headerEndPos + 4);
+
+    std::istringstream hStream(headersPart);
+    std::string requestLine;
+    std::getline(hStream, requestLine);
+    if (!requestLine.empty() && requestLine.back() == '\r') requestLine.pop_back();
+
+    std::istringstream reqLineStream(requestLine);
+    std::string method, fullPath, httpVer;
+    reqLineStream >> method >> fullPath >> httpVer;
+
+    std::map<std::string, std::string> headers;
+    std::string line;
+    while (std::getline(hStream, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        auto colon = line.find(':');
+        if (colon != std::string::npos) {
+            std::string key = line.substr(0, colon);
+            std::string val = line.substr(colon + 1);
+            while (!val.empty() && val.front() == ' ') val.erase(val.begin());
+            for (auto& c : key) c = static_cast<char>(tolower(c));
+            headers[key] = val;
+        }
+    }
+
+    std::string path = fullPath;
+    std::string query = "";
+    auto qPos = fullPath.find('?');
+    if (qPos != std::string::npos) {
+        path = fullPath.substr(0, qPos);
+        query = fullPath.substr(qPos + 1);
+    }
+
+    // CORS pre-flight
+    if (method == "OPTIONS") {
+        std::string resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nConnection: close\r\n\r\n";
+        send(sock, resp.c_str(), static_cast<int>(resp.size()), 0);
+        closesocket(sock);
+        return;
+    }
+
+    // 1. Serve Mobile Web Portal
+    if (method == "GET" && (path == "/" || path == "/index.html" || path == "/web")) {
+        std::filesystem::path htmlPath = std::filesystem::current_path() / "ui" / "web-offline.html";
+        if (!std::filesystem::exists(htmlPath)) {
+            htmlPath = std::filesystem::current_path() / ".." / "ui" / "web-offline.html";
+        }
+        std::string htmlContent = "";
+        if (std::filesystem::exists(htmlPath)) {
+            std::ifstream in(htmlPath, std::ios::binary);
+            if (in.is_open()) {
+                std::ostringstream ss;
+                ss << in.rdbuf();
+                htmlContent = ss.str();
+            }
+        }
+        if (htmlContent.empty()) {
+            htmlContent = "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>BlackHole Local</title></head><body style='background:#09090b;color:#fff;font-family:sans-serif;text-align:center;padding:40px;'><h1>BlackHole Local Share</h1><p>Online on Local Hotspot</p></body></html>";
+        }
+        std::string resp = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(htmlContent.size()) + "\r\nConnection: close\r\n\r\n" + htmlContent;
+        send(sock, resp.c_str(), static_cast<int>(resp.size()), 0);
+        closesocket(sock);
+        return;
+    }
+
+    // 2. Return list of shared files
+    if (method == "GET" && path == "/api/files") {
+        std::vector<std::string> currentFiles = getSharedFiles();
+        JsonValue arr = JsonValue::Array();
+        int id = 0;
+        for (auto const& fpath : currentFiles) {
+            std::filesystem::path fp(fpath);
+            if (std::filesystem::exists(fp)) {
+                JsonValue item = JsonValue::Object();
+                item.set("id", id);
+                item.set("name", fp.filename().string());
+                item.set("size", static_cast<int64_t>(std::filesystem::file_size(fp)));
+                item.set("url", "/api/download?id=" + std::to_string(id));
+                arr.push(item);
+                id++;
+            }
+        }
+        std::string jsonStr = arr.serialize();
+        std::string resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(jsonStr.size()) + "\r\nConnection: close\r\n\r\n" + jsonStr;
+        send(sock, resp.c_str(), static_cast<int>(resp.size()), 0);
+        closesocket(sock);
+        return;
+    }
+
+    // 3. Download a shared file from PC to phone
+    if (method == "GET" && path == "/api/download") {
+        int targetId = -1;
+        auto idPos = query.find("id=");
+        if (idPos != std::string::npos) {
+            targetId = std::atoi(query.substr(idPos + 3).c_str());
+        }
+        std::vector<std::string> currentFiles = getSharedFiles();
+        if (targetId >= 0 && targetId < static_cast<int>(currentFiles.size())) {
+            std::string targetPath = currentFiles[targetId];
+            std::filesystem::path fp(targetPath);
+            if (std::filesystem::exists(fp)) {
+                int64_t fileSize = static_cast<int64_t>(std::filesystem::file_size(fp));
+                std::string fileName = fp.filename().string();
+                std::string header = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"" + fileName + "\"\r\nContent-Length: " + std::to_string(fileSize) + "\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n";
+                send(sock, header.c_str(), static_cast<int>(header.size()), 0);
+
+                std::ifstream inFile(targetPath, std::ios::binary);
+                std::vector<char> fbuf(64 * 1024);
+                int64_t sent = 0;
+                auto startT = std::chrono::steady_clock::now();
+                while (inFile.good() && sent < fileSize) {
+                    inFile.read(fbuf.data(), fbuf.size());
+                    std::streamsize bytesRead = inFile.gcount();
+                    if (bytesRead <= 0) break;
+                    int s = send(sock, fbuf.data(), static_cast<int>(bytesRead), 0);
+                    if (s <= 0) break;
+                    sent += s;
+
+                    auto now = std::chrono::steady_clock::now();
+                    double elapsed = std::chrono::duration<double>(now - startT).count();
+                    double speed = elapsed > 0 ? (sent / (1024.0 * 1024.0)) / elapsed : 0;
+                    int pct = fileSize > 0 ? static_cast<int>((sent * 100) / fileSize) : 100;
+
+                    TransferEvent prog;
+                    prog.type = "progress";
+                    prog.peerIp = clientIp;
+                    prog.peerAlias = "Mobile Browser";
+                    prog.currentFileName = fileName;
+                    prog.bytesTransferred = sent;
+                    prog.totalBytes = fileSize;
+                    prog.speedMBs = speed;
+                    prog.progressPercent = pct;
+                    if (onTransferEvent) onTransferEvent(prog);
+                }
+                inFile.close();
+
+                TransferEvent done;
+                done.type = "complete";
+                done.peerIp = clientIp;
+                done.peerAlias = "Mobile Browser";
+                done.currentFileName = fileName;
+                done.totalBytes = fileSize;
+                done.progressPercent = 100;
+                done.message = "Downloaded by phone: " + fileName;
+                if (onTransferEvent) onTransferEvent(done);
+
+                closesocket(sock);
+                return;
+            }
+        }
+        std::string notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        send(sock, notFound.c_str(), static_cast<int>(notFound.size()), 0);
+        closesocket(sock);
+        return;
+    }
+
+    // 4. Upload file from phone to PC
+    if (method == "POST" && path == "/api/upload") {
+        int64_t contentLength = 0;
+        if (headers.count("content-length")) {
+            contentLength = std::atoll(headers["content-length"].c_str());
+        }
+        std::string fileName = "Mobile_Upload_" + std::to_string(getCurrentTimeMs()) + ".bin";
+        if (headers.count("x-filename")) {
+            fileName = HttpUrlDecode(headers["x-filename"]);
+        } else if (query.find("filename=") != std::string::npos) {
+            fileName = HttpUrlDecode(query.substr(query.find("filename=") + 9));
+        }
+
+        std::string destDir;
+        {
+            std::lock_guard<std::mutex> lock(settingsMutex);
+            destDir = settings.destinationFolder;
+        }
+        std::filesystem::create_directories(destDir);
+        std::filesystem::path outFilePath = std::filesystem::path(destDir) / fileName;
+        std::ofstream outFile(outFilePath, std::ios::binary);
+
+        int64_t totalReceived = 0;
+        auto startT = std::chrono::steady_clock::now();
+
+        if (!bodyInitial.empty()) {
+            outFile.write(bodyInitial.data(), bodyInitial.size());
+            totalReceived += bodyInitial.size();
+        }
+
+        std::vector<char> upBuf(64 * 1024);
+        while (totalReceived < contentLength || contentLength == 0) {
+            int r = recv(sock, upBuf.data(), static_cast<int>(upBuf.size()), 0);
+            if (r <= 0) break;
+            outFile.write(upBuf.data(), r);
+            totalReceived += r;
+
+            auto now = std::chrono::steady_clock::now();
+            double elapsed = std::chrono::duration<double>(now - startT).count();
+            double speed = elapsed > 0 ? (totalReceived / (1024.0 * 1024.0)) / elapsed : 0;
+            int pct = contentLength > 0 ? static_cast<int>((totalReceived * 100) / contentLength) : 50;
+
+            TransferEvent prog;
+            prog.type = "progress";
+            prog.peerIp = clientIp;
+            prog.peerAlias = "Mobile Device";
+            prog.currentFileName = fileName;
+            prog.bytesTransferred = totalReceived;
+            prog.totalBytes = contentLength;
+            prog.speedMBs = speed;
+            prog.progressPercent = pct;
+            if (onTransferEvent) onTransferEvent(prog);
+        }
+        outFile.close();
+
+        TransferEvent done;
+        done.type = "complete";
+        done.peerIp = clientIp;
+        done.peerAlias = "Mobile Device";
+        done.currentFileName = fileName;
+        done.totalBytes = totalReceived;
+        done.progressPercent = 100;
+        done.message = "Uploaded from phone: " + fileName;
+        if (onTransferEvent) onTransferEvent(done);
+
+        std::string resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{\"status\":\"ok\"}";
+        send(sock, resp.c_str(), static_cast<int>(resp.size()), 0);
+        closesocket(sock);
+        return;
+    }
+
+    std::string notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    send(sock, notFound.c_str(), static_cast<int>(notFound.size()), 0);
+    closesocket(sock);
 }
 
 } // namespace BlackHole

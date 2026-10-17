@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>BlackHole - Offline Local Share</title>
+  <style>
+    :root {
+      --bg-main: #09090b;
+      --bg-card: rgba(18, 18, 24, 0.95);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --accent-violet: #8b5cf6;
+      --accent-cyan: #06b6d4;
+      --accent-green: #10b981;
+      --text-main: #f4f4f5;
+      --text-sub: #a1a1aa;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body {
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      min-height: 100vh;
+      padding: 20px 16px 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 24px;
+      width: 100%;
+      max-width: 480px;
+    }
+    .logo {
+      width: 52px;
+      height: 52px;
+      filter: drop-shadow(0 0 16px rgba(139, 92, 246, 0.6));
+      margin-bottom: 8px;
+    }
+    h1 { font-size: 1.4rem; font-weight: 800; letter-spacing: -0.02em; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #34d399;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 20px;
+      margin-top: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .badge-dot { width: 6px; height: 6px; background: #34d399; border-radius: 50%; box-shadow: 0 0 8px #34d399; }
+    
+    .card {
+      width: 100%;
+      max-width: 480px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+    }
+    .card-title {
+      font-size: 1rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      color: #ffffff;
+    }
+    .file-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+    }
+    .file-info { overflow: hidden; margin-right: 12px; }
+    .file-name { font-size: 0.9rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #f4f4f5; }
+    .file-size { font-size: 0.78rem; color: var(--text-sub); }
+    .btn-download {
+      background: linear-gradient(135deg, var(--accent-violet), #6366f1);
+      color: #fff;
+      text-decoration: none;
+      padding: 8px 16px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      white-space: nowrap;
+      box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+    }
+    .btn-download:active { transform: scale(0.96); }
+
+    .dropzone {
+      border: 2px dashed rgba(139, 92, 246, 0.4);
+      border-radius: 16px;
+      padding: 24px 16px;
+      text-align: center;
+      background: rgba(139, 92, 246, 0.04);
+      cursor: pointer;
+    }
+    .dropzone:active { background: rgba(139, 92, 246, 0.08); }
+    .dropzone-text { font-size: 0.92rem; font-weight: 600; color: #f4f4f5; margin-bottom: 4px; }
+    .dropzone-sub { font-size: 0.78rem; color: var(--text-sub); }
+
+    .btn-upload {
+      width: 100%;
+      background: linear-gradient(135deg, var(--accent-cyan), #0284c7);
+      color: #fff;
+      border: none;
+      padding: 14px;
+      border-radius: 12px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      margin-top: 14px;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(6, 182, 212, 0.35);
+    }
+    .btn-upload:active { transform: scale(0.98); }
+    .btn-upload:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .progress-box {
+      margin-top: 14px;
+      display: none;
+    }
+    .meter {
+      height: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent-cyan), #38bdf8);
+      transition: width 0.1s ease-out;
+    }
+    .stats {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: var(--text-sub);
+    }
+    .no-files {
+      text-align: center;
+      padding: 24px;
+      font-size: 0.88rem;
+      color: var(--text-sub);
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <svg class="logo" viewBox="0 0 100 100" fill="none">
+      <defs>
+        <radialGradient id="hole" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#000000"/>
+          <stop offset="70%" stop-color="#020205"/>
+          <stop offset="100%" stop-color="#0f0728"/>
+        </radialGradient>
+        <linearGradient id="ring" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#ec4899"/>
+          <stop offset="50%" stop-color="#8b5cf6"/>
+          <stop offset="100%" stop-color="#06b6d4"/>
+        </linearGradient>
+      </defs>
+      <circle cx="50" cy="50" r="48" stroke="url(#ring)" stroke-width="4" opacity="0.8"/>
+      <ellipse cx="50" cy="50" rx="42" ry="18" fill="none" stroke="url(#ring)" stroke-width="5" transform="rotate(-25 50 50)"/>
+      <circle cx="50" cy="50" r="24" fill="url(#hole)"/>
+      <ellipse cx="50" cy="50" rx="34" ry="12" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.9" transform="rotate(-25 50 50)"/>
+    </svg>
+    <h1>BlackHole Local Share</h1>
+    <div class="badge">
+      <span class="badge-dot"></span>
+      Direct Wi-Fi / Hotspot • Zero Data Used
+    </div>
+  </div>
+
+  <!-- 1. Download Files from PC -->
+  <div class="card">
+    <div class="card-title">
+      📥 Available Files from PC
+    </div>
+    <div id="file-list">
+      <div class="no-files">Checking shared files...</div>
+    </div>
+  </div>
+
+  <!-- 2. Send Files to PC -->
+  <div class="card">
+    <div class="card-title">
+      📤 Send Files to PC
+    </div>
+    <input type="file" id="upload-input" multiple style="display: none;">
+    <div class="dropzone" id="dropzone">
+      <div class="dropzone-text">Tap to select photos, videos or files</div>
+      <div class="dropzone-sub">Streams directly to PC over local Wi-Fi</div>
+    </div>
+    <div id="selected-list" style="margin-top: 12px;"></div>
+    
+    <button class="btn-upload" id="btn-upload" style="display: none;">Send to PC</button>
+
+    <div class="progress-box" id="progress-box">
+      <div class="meter"><div class="fill" id="progress-fill"></div></div>
+      <div class="stats">
+        <span id="progress-text">0%</span>
+        <span id="progress-speed">0 MB/s</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function formatBytes(bytes) {
+      if (!bytes || bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // Load available files from PC
+    async function loadSharedFiles() {
+      const container = document.getElementById('file-list');
+      try {
+        const res = await fetch('/api/files');
+        const files = await res.json();
+        container.innerHTML = '';
+
+        if (!files || files.length === 0) {
+          container.innerHTML = '<div class="no-files">No files currently selected on PC.<br>You can send files to PC below!</div>';
+          return;
+        }
+
+        files.forEach(f => {
+          const item = document.createElement('div');
+          item.className = 'file-item';
+          item.innerHTML = `
+            <div class="file-info">
+              <div class="file-name" title="${f.name}">${f.name}</div>
+              <div class="file-size">${formatBytes(f.size)}</div>
+            </div>
+            <a href="${f.url}" download="${f.name}" class="btn-download">Download</a>
+          `;
+          container.appendChild(item);
+        });
+      } catch (e) {
+        container.innerHTML = '<div class="no-files" style="color:#ef4444;">Cannot contact PC. Ensure phone is on same Wi-Fi.</div>';
+      }
+    }
+
+    // Upload files to PC
+    const dropzone = document.getElementById('dropzone');
+    const uploadInput = document.getElementById('upload-input');
+    const btnUpload = document.getElementById('btn-upload');
+    const selectedList = document.getElementById('selected-list');
+    const progressBox = document.getElementById('progress-box');
+    const progressFill = document.getElementById('progress-fill');
+    const progressText = document.getElementById('progress-text');
+    const progressSpeed = document.getElementById('progress-speed');
+
+    let pendingFiles = [];
+
+    dropzone.addEventListener('click', () => uploadInput.click());
+    uploadInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        pendingFiles = Array.from(e.target.files);
+        renderSelected();
+      }
+    });
+
+    function renderSelected() {
+      selectedList.innerHTML = '';
+      if (pendingFiles.length === 0) {
+        btnUpload.style.display = 'none';
+        return;
+      }
+      btnUpload.style.display = 'block';
+      btnUpload.innerText = `Send ${pendingFiles.length} file(s) to PC`;
+
+      pendingFiles.forEach((f, idx) => {
+        const item = document.createElement('div');
+        item.style.fontSize = '0.82rem';
+        item.style.color = '#a1a1aa';
+        item.style.padding = '4px 0';
+        item.innerText = `• ${f.name} (${formatBytes(f.size)})`;
+        selectedList.appendChild(item);
+      });
+    }
+
+    btnUpload.addEventListener('click', async () => {
+      if (pendingFiles.length === 0) return;
+      btnUpload.disabled = true;
+      progressBox.style.display = 'block';
+
+      for (let i = 0; i < pendingFiles.length; i++) {
+        const file = pendingFiles[i];
+        progressText.innerText = `Sending #${i+1}/${pendingFiles.length}: ${file.name}`;
+        progressFill.style.width = '0%';
+
+        await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', '/api/upload?filename=' + encodeURIComponent(file.name));
+          xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+
+          const startTime = Date.now();
+          xhr.upload.onprogress = (ev) => {
+            if (ev.lengthComputable) {
+              const pct = Math.round((ev.loaded / ev.total) * 100);
+              progressFill.style.width = pct + '%';
+              const elapsed = (Date.now() - startTime) / 1000;
+              const speed = elapsed > 0 ? (ev.loaded / (1024 * 1024)) / elapsed : 0;
+              progressSpeed.innerText = `${speed.toFixed(1)} MB/s (${formatBytes(ev.loaded)}/${formatBytes(ev.total)})`;
+            }
+          };
+
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) resolve();
+            else reject(new Error('Upload failed'));
+          };
+          xhr.onerror = () => reject(new Error('Network error'));
+          xhr.send(file);
+        });
+      }
+
+      progressFill.style.width = '100%';
+      progressText.innerText = 'All files uploaded to PC! ✓';
+      progressSpeed.innerText = 'Complete';
+      btnUpload.disabled = false;
+      btnUpload.innerText = 'Uploaded Successfully!';
+      setTimeout(() => {
+        pendingFiles = [];
+        renderSelected();
+        progressBox.style.display = 'none';
+        btnUpload.innerText = 'Send to PC';
+      }, 2500);
+    });
+
+    loadSharedFiles();
+    setInterval(loadSharedFiles, 3000);
+  </script>
+</body>
+</html>
