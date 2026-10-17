@@ -13,6 +13,7 @@
 #include <iostream>
 
 #include "WebView2.h"
+#include "resource.h"
 #include "NetworkEngine.h"
 #include "AppConfig.h"
 #include "SimpleJson.h"
@@ -289,6 +290,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     wcex.style = CS_HREDRAW | CS_VREDRAW;
     wcex.lpfnWndProc = WndProc;
     wcex.hInstance = hInstance;
+    wcex.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
+    wcex.hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
     wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wcex.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wcex.lpszClassName = L"BlackHoleWindowClass";
@@ -304,6 +307,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     );
 
     if (!g_hWnd) return FALSE;
+
+    // Explicitly set taskbar and title bar icons and full Unicode title
+    SendMessage(g_hWnd, WM_SETICON, ICON_BIG, (LPARAM)wcex.hIcon);
+    SendMessage(g_hWnd, WM_SETICON, ICON_SMALL, (LPARAM)wcex.hIconSm);
+    SetWindowTextW(g_hWnd, L"BlackHole - Zero-Knowledge Native P2P");
 
     // Enable Immersive Dark Mode in Windows Title Bar
     BOOL darkMode = TRUE;

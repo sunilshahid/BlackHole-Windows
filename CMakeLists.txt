@@ -13,10 +13,13 @@ link_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/packages/Microsoft.Web.WebView2/build/native/x64
 )
 
+add_definitions(-DUNICODE -D_UNICODE)
+
 set(SOURCES
     src/main.cpp
     src/AppConfig.cpp
     src/NetworkEngine.cpp
+    src/Resource.rc
 )
 
 add_executable(BlackHole WIN32 ${SOURCES})
