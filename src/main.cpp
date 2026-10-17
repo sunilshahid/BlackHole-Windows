@@ -41,20 +41,6 @@ static BlackHole::AppSettings g_settings;
 static std::mutex g_postMsgMutex;
 static std::vector<std::wstring> g_pendingJsonMessages;
 
-// Thread-safe helper to post JSON string to WebView2 UI
-static void PostJsonToWebview(const std::string& jsonStr) {
-    if (!g_hWnd) return;
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, jsonStr.c_str(), -1, NULL, 0);
-    std::wstring wstr(wlen, 0);
-    MultiByteToWideChar(CP_UTF8, 0, jsonStr.c_str(), -1, &wstr[0], wlen);
-
-    {
-        std::lock_guard<std::mutex> lock(g_postMsgMutex);
-        g_pendingJsonMessages.push_back(std::move(wstr));
-    }
-    PostMessageW(g_hWnd, WM_APP_POST_JSON, 0, 0);
-}
-
 // Convert wide string to utf8
 static std::string WideToUtf8(const std::wstring& wstr) {
     if (wstr.empty()) return "";
@@ -71,6 +57,32 @@ static std::wstring Utf8ToWide(const std::string& str) {
     std::wstring wstr(len - 1, 0);
     MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &wstr[0], len);
     return wstr;
+}
+
+static void LogDebug(const std::string& msg) {
+    PWSTR localAppData = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &localAppData))) {
+        std::wstring dir = std::wstring(localAppData) + L"\\BlackHole";
+        CreateDirectoryW(dir.c_str(), NULL);
+        std::wstring logPath = dir + L"\\debug.log";
+        CoTaskMemFree(localAppData);
+        std::ofstream f(logPath, std::ios::app);
+        if (f.is_open()) {
+            f << "[" << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() << "] " << msg << "\n";
+            f.flush();
+        }
+    }
+}
+
+// Thread-safe helper to post JSON string to WebView2 UI
+static void PostJsonToWebview(const std::string& jsonStr) {
+    if (!g_hWnd) return;
+    std::wstring wstr = Utf8ToWide(jsonStr);
+    {
+        std::lock_guard<std::mutex> lock(g_postMsgMutex);
+        g_pendingJsonMessages.push_back(std::move(wstr));
+    }
+    PostMessageW(g_hWnd, WM_APP_POST_JSON, 0, 0);
 }
 
 // Native Windows Folder Browser
@@ -133,8 +145,11 @@ static std::vector<std::string> BrowseForFiles(HWND parent) {
 
 // Handle messages received from JavaScript via window.chrome.webview.postMessage
 static void HandleWebMessage(const std::string& msgJson) {
-    BlackHole::JsonValue req = BlackHole::JsonParser::parse(msgJson);
-    std::string action = req.get("action").asString();
+    try {
+        LogDebug("HandleWebMessage incoming: " + msgJson);
+        BlackHole::JsonValue req = BlackHole::JsonParser::parse(msgJson);
+        std::string action = req.get("action").asString();
+        LogDebug("HandleWebMessage action: " + action);
 
     if (action == "get_init_data") {
         BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
@@ -305,6 +320,11 @@ static void HandleWebMessage(const std::string& msgJson) {
         resp.set("peers", peers);
         PostJsonToWebview(resp.serialize());
     }
+    } catch (const std::exception& e) {
+        LogDebug("EXCEPTION in HandleWebMessage: " + std::string(e.what()));
+    } catch (...) {
+        LogDebug("UNKNOWN EXCEPTION in HandleWebMessage");
+    }
 }
 
 // Window Procedure
@@ -325,12 +345,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
         if (g_webview) {
             for (const auto& wstr : msgs) {
-                g_webview->PostWebMessageAsJson(wstr.c_str());
+                try {
+                    HRESULT hr = g_webview->PostWebMessageAsJson(wstr.c_str());
+                    if (FAILED(hr)) {
+                        char buf[128];
+                        sprintf_s(buf, "PostWebMessageAsJson hr=0x%08X", hr);
+                        LogDebug(buf);
+                    }
+                } catch (const std::exception& e) {
+                    LogDebug("EXCEPTION in PostWebMessageAsJson: " + std::string(e.what()));
+                } catch (...) {
+                    LogDebug("UNKNOWN EXCEPTION in PostWebMessageAsJson");
+                }
             }
         }
         break;
     }
     case WM_DESTROY:
+        LogDebug("WM_DESTROY received in WndProc!");
         if (g_controller) {
             g_controller->Close();
             g_controller = nullptr;
@@ -352,11 +384,15 @@ static void InitializeWebView(HWND hWnd, const std::wstring& baseDataDir, bool i
         actualDataDir = baseDataDir + L"\\Session_" + std::to_wstring(GetCurrentProcessId());
         CreateDirectoryW(actualDataDir.c_str(), NULL);
     }
+    LogDebug("InitializeWebView called. isFallback=" + std::to_string(isFallback) + " dir=" + WideToUtf8(actualDataDir));
 
     HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(
         nullptr, actualDataDir.c_str(), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [hWnd, baseDataDir, isFallback](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+                char buf[128];
+                sprintf_s(buf, "Environment callback: result=0x%08X env=%p", result, env);
+                LogDebug(buf);
                 if (FAILED(result) || !env) {
                     if (!isFallback) {
                         InitializeWebView(hWnd, baseDataDir, true);
@@ -372,6 +408,9 @@ static void InitializeWebView(HWND hWnd, const std::wstring& baseDataDir, bool i
                     hWnd,
                     Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                         [hWnd, baseDataDir, isFallback](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
+                            char cbuf[128];
+                            sprintf_s(cbuf, "Controller callback: result=0x%08X controller=%p", result, controller);
+                            LogDebug(cbuf);
                             if (FAILED(result) || !controller) {
                                 if (!isFallback) {
                                     // Automatic fallback to clean session directory
@@ -386,11 +425,13 @@ static void InitializeWebView(HWND hWnd, const std::wstring& baseDataDir, bool i
 
                             g_controller = controller;
                             g_controller->get_CoreWebView2(&g_webview);
+                            LogDebug("Step 1: got CoreWebView2");
 
                             // Resize WebView to fill client area
                             RECT bounds;
                             GetClientRect(hWnd, &bounds);
                             g_controller->put_Bounds(bounds);
+                            LogDebug("Step 2: put_Bounds done");
 
                             // Configure settings
                             ComPtr<ICoreWebView2Settings> settings;
@@ -400,23 +441,31 @@ static void InitializeWebView(HWND hWnd, const std::wstring& baseDataDir, bool i
                                 settings->put_AreDefaultScriptDialogsEnabled(TRUE);
                                 settings->put_IsWebMessageEnabled(TRUE);
                             }
+                            LogDebug("Step 3: settings configured");
 
                             // Register WebMessageReceived handler
                             EventRegistrationToken token;
                             g_webview->add_WebMessageReceived(
                                 Callback<ICoreWebView2WebMessageReceivedEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
-                                        LPWSTR messageRaw;
-                                        args->TryGetWebMessageAsString(&messageRaw);
-                                        if (messageRaw) {
-                                            std::string msgUtf8 = WideToUtf8(messageRaw);
-                                            CoTaskMemFree(messageRaw);
-                                            HandleWebMessage(msgUtf8);
+                                        try {
+                                            LPWSTR messageRaw = nullptr;
+                                            HRESULT hr = args->TryGetWebMessageAsString(&messageRaw);
+                                            if (SUCCEEDED(hr) && messageRaw) {
+                                                std::string msgUtf8 = WideToUtf8(messageRaw);
+                                                CoTaskMemFree(messageRaw);
+                                                HandleWebMessage(msgUtf8);
+                                            }
+                                        } catch (const std::exception& e) {
+                                            LogDebug("EXCEPTION in WebMessageReceived callback: " + std::string(e.what()));
+                                        } catch (...) {
+                                            LogDebug("UNKNOWN EXCEPTION in WebMessageReceived callback");
                                         }
                                         return S_OK;
                                     }).Get(),
                                 &token
                             );
+                            LogDebug("Step 4: add_WebMessageReceived done");
 
                             // Auto-save incoming downloaded files directly to destinationFolder without prompts
                             ComPtr<ICoreWebView2_4> webview4;
@@ -442,6 +491,7 @@ static void InitializeWebView(HWND hWnd, const std::wstring& baseDataDir, bool i
                                     &downloadToken
                                 );
                             }
+                            LogDebug("Step 5: downloadStarting checked");
 
                             // Resolve UI path reliably relative to the executable
                             WCHAR exePath[MAX_PATH] = { 0 };
@@ -455,13 +505,16 @@ static void InitializeWebView(HWND hWnd, const std::wstring& baseDataDir, bool i
                             if (!std::filesystem::exists(uiPath)) {
                                 uiPath = std::filesystem::current_path() / "ui" / "index.html";
                             }
+                            LogDebug("Step 6: resolved uiPath = " + WideToUtf8(uiPath.wstring()));
 
                             std::wstring uiUri = L"file:///" + uiPath.wstring();
                             for (auto& c : uiUri) {
                                 if (c == L'\\') c = L'/';
                             }
+                            LogDebug("Step 7: navigating to uiUri = " + WideToUtf8(uiUri));
 
-                            g_webview->Navigate(uiUri.c_str());
+                            HRESULT navHr = g_webview->Navigate(uiUri.c_str());
+                            LogDebug("Step 8: Navigate returned hr = " + std::to_string(navHr));
                             return S_OK;
                         }).Get()
                 );
@@ -470,21 +523,33 @@ static void InitializeWebView(HWND hWnd, const std::wstring& baseDataDir, bool i
     );
 }
 
+static LONG WINAPI CrashFilter(EXCEPTION_POINTERS* pEx) {
+    char buf[256];
+    sprintf_s(buf, "CRASH! ExceptionCode = 0x%08X at Address = %p",
+        pEx->ExceptionRecord->ExceptionCode,
+        pEx->ExceptionRecord->ExceptionAddress);
+    LogDebug(buf);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
-    // 1. Single Instance Check: Bring existing window to front if already open
+    SetUnhandledExceptionFilter(CrashFilter);
+    LogDebug("WinMain started");
     HANDLE hMutex = CreateMutexW(NULL, TRUE, L"BlackHole_Native_SingleInstance_Mutex_v1");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         HWND hExisting = FindWindowW(L"BlackHoleWindowClass", NULL);
         if (hExisting) {
+            LogDebug("Found existing window, restoring and bringing to front");
             if (IsIconic(hExisting)) {
                 ShowWindow(hExisting, SW_RESTORE);
             } else {
                 ShowWindow(hExisting, SW_SHOW);
             }
             SetForegroundWindow(hExisting);
+            if (hMutex) CloseHandle(hMutex);
+            return 0; // Clean exit, another instance is actively running
         }
-        if (hMutex) CloseHandle(hMutex);
-        return 0; // Clean exit without error
+        LogDebug("Mutex existed but no window found - proceeding with fresh startup");
     }
 
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
@@ -580,11 +645,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     InitializeWebView(g_hWnd, webViewDataDir);
 
     // Message Loop
+    LogDebug("Entering GetMessage loop");
     MSG msg;
     while (GetMessage(&msg, nullptr, 0, 0)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+    LogDebug("Exited GetMessage loop, wParam=" + std::to_string(msg.wParam));
 
     if (g_network) {
         g_network->stop();
