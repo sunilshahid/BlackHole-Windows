@@ -34,6 +34,8 @@ struct TransferEvent {
     double speedMBs = 0.0;
     int progressPercent = 0;
     std::string message;
+    int fileCount = 0;
+    std::vector<std::string> fileNames;
 };
 
 class NetworkEngine {
@@ -80,7 +82,7 @@ public:
     void acceptIncomingTransfer();
     void rejectIncomingTransfer();
 
-    bool sendFilesToPeer(const std::string& peerIp, int peerPort, const std::vector<std::string>& filePaths);
+    bool sendFilesToPeer(const std::string& peerIp, int peerPort, const std::vector<std::string>& filePaths, const std::string& targetAlias = "");
     void cancelTransfer();
 
     // Local Web Link Sharing (Bidirectional Local HTTP Server)

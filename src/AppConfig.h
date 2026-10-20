@@ -6,7 +6,7 @@ namespace BlackHole {
 struct AppSettings {
     std::string alias = "BlackHole-PC";
     std::string destinationFolder = "";
-    bool quickSave = true;
+    bool quickSave = false;
     int port = 53317;
     bool encryptionEnabled = true;
     bool minimizeToTray = true;

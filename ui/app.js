@@ -490,7 +490,7 @@ if (btnModalConfirmReceive) {
 }
 
 // ========================================================
-// 📊 LIVE IN-APP RECEIVING & TRANSFER PANEL (On-Screen)
+// 📊 LIVE IN-APP RECEIVING & SENDING PANELS (On-Screen)
 // ========================================================
 const receiveLivePanel = document.getElementById('receive-live-panel');
 const receiveLiveTitle = document.getElementById('receive-live-title');
@@ -502,47 +502,77 @@ const receiveLiveSpeed = document.getElementById('receive-live-speed');
 const receiveLiveEta = document.getElementById('receive-live-eta');
 const btnReceiveCancelTransfer = document.getElementById('btn-receive-cancel-transfer');
 
+const sendLivePanel = document.getElementById('send-live-panel');
+const sendLiveTitle = document.getElementById('send-live-title');
+const sendLiveFile = document.getElementById('send-live-file');
+const sendLivePct = document.getElementById('send-live-pct');
+const sendLiveBytes = document.getElementById('send-live-bytes');
+const sendLiveFill = document.getElementById('send-live-fill');
+const sendLiveSpeed = document.getElementById('send-live-speed');
+const sendLiveEta = document.getElementById('send-live-eta');
+const btnSendCancelTransfer = document.getElementById('btn-send-cancel-transfer');
+
 function updateLiveTransferUI(p) {
-  if (!receiveLivePanel) return;
-
   clearTimeout(livePanelHideTimeout);
-  receiveLivePanel.style.display = 'block';
-
-  if (receiveLiveTitle && p.title) receiveLiveTitle.innerText = p.title;
-  if (receiveLiveFile && p.fileName) receiveLiveFile.innerText = p.fileName;
 
   const pct = Math.min(100, Math.max(0, p.percentage || 0));
-  if (receiveLivePct) receiveLivePct.innerText = `${pct}%`;
-  if (receiveLiveFill) receiveLiveFill.style.width = `${pct}%`;
-  if (receiveLiveBytes) receiveLiveBytes.innerText = `${formatBytes(p.transferredBytes)} / ${formatBytes(p.totalBytes)}`;
-  if (receiveLiveSpeed) receiveLiveSpeed.innerText = `${(p.speedMBs || 0).toFixed(1)} MB/s`;
-  if (receiveLiveEta) receiveLiveEta.innerText = formatTime(p.etaSeconds);
+  const bytesStr = `${formatBytes(p.transferredBytes)} / ${formatBytes(p.totalBytes)}`;
+  const speedStr = `${(p.speedMBs || 0).toFixed(1)} MB/s`;
+  const etaStr = formatTime(p.etaSeconds);
+
+  // Update Receive Panel
+  if (receiveLivePanel) {
+    receiveLivePanel.style.display = 'block';
+    if (receiveLiveTitle && p.title) receiveLiveTitle.innerText = p.title;
+    if (receiveLiveFile && p.fileName) receiveLiveFile.innerText = p.fileName;
+    if (receiveLivePct) receiveLivePct.innerText = `${pct}%`;
+    if (receiveLiveFill) receiveLiveFill.style.width = `${pct}%`;
+    if (receiveLiveBytes) receiveLiveBytes.innerText = bytesStr;
+    if (receiveLiveSpeed) receiveLiveSpeed.innerText = speedStr;
+    if (receiveLiveEta) receiveLiveEta.innerText = etaStr;
+  }
+
+  // Update Send Panel
+  if (sendLivePanel) {
+    sendLivePanel.style.display = 'block';
+    if (sendLiveTitle && p.title) sendLiveTitle.innerText = p.title;
+    if (sendLiveFile && p.fileName) sendLiveFile.innerText = p.fileName;
+    if (sendLivePct) sendLivePct.innerText = `${pct}%`;
+    if (sendLiveFill) sendLiveFill.style.width = `${pct}%`;
+    if (sendLiveBytes) sendLiveBytes.innerText = bytesStr;
+    if (sendLiveSpeed) sendLiveSpeed.innerText = speedStr;
+    if (sendLiveEta) sendLiveEta.innerText = etaStr;
+  }
 }
 
 function completeLiveTransferUI(title, totalBytes) {
-  if (!receiveLivePanel) return;
-
   if (receiveLiveTitle) receiveLiveTitle.innerText = 'Transfer Complete! 🎉';
   if (receiveLivePct) receiveLivePct.innerText = '100%';
   if (receiveLiveFill) receiveLiveFill.style.width = '100%';
   if (receiveLiveEta) receiveLiveEta.innerText = 'Done';
 
+  if (sendLiveTitle) sendLiveTitle.innerText = 'Transfer Complete! 🎉';
+  if (sendLivePct) sendLivePct.innerText = '100%';
+  if (sendLiveFill) sendLiveFill.style.width = '100%';
+  if (sendLiveEta) sendLiveEta.innerText = 'Done';
+
   addTransferHistoryItem(title || 'File Transfer', totalBytes || 0, 'Success');
 
   clearTimeout(livePanelHideTimeout);
   livePanelHideTimeout = setTimeout(() => {
-    receiveLivePanel.style.display = 'none';
+    if (receiveLivePanel) receiveLivePanel.style.display = 'none';
+    if (sendLivePanel) sendLivePanel.style.display = 'none';
   }, 4000);
 }
 
 function errorLiveTransferUI(message) {
-  if (!receiveLivePanel) return;
-
   if (receiveLiveTitle) receiveLiveTitle.innerText = message || 'Transfer Cancelled';
+  if (sendLiveTitle) sendLiveTitle.innerText = message || 'Transfer Cancelled';
 
   clearTimeout(livePanelHideTimeout);
   livePanelHideTimeout = setTimeout(() => {
-    receiveLivePanel.style.display = 'none';
+    if (receiveLivePanel) receiveLivePanel.style.display = 'none';
+    if (sendLivePanel) sendLivePanel.style.display = 'none';
   }, 2500);
 }
 
@@ -551,9 +581,41 @@ if (btnReceiveCancelTransfer) {
     sendToCpp('cancel_transfer');
     stopWebRTCShareSession();
     if (receiveLiveTitle) receiveLiveTitle.innerText = 'Cancelling transfer...';
+    if (sendLiveTitle) sendLiveTitle.innerText = 'Cancelling transfer...';
     setTimeout(() => {
       if (receiveLivePanel) receiveLivePanel.style.display = 'none';
+      if (sendLivePanel) sendLivePanel.style.display = 'none';
     }, 1000);
+  });
+}
+
+if (btnSendCancelTransfer) {
+  btnSendCancelTransfer.addEventListener('click', () => {
+    sendToCpp('cancel_transfer');
+    stopWebRTCShareSession();
+    if (sendLiveTitle) sendLiveTitle.innerText = 'Cancelling transfer...';
+    if (receiveLiveTitle) receiveLiveTitle.innerText = 'Cancelling transfer...';
+    setTimeout(() => {
+      if (sendLivePanel) sendLivePanel.style.display = 'none';
+      if (receiveLivePanel) receiveLivePanel.style.display = 'none';
+    }, 1000);
+  });
+}
+
+// Request confirmation handlers
+const btnRequestAccept = document.getElementById('btn-request-accept');
+if (btnRequestAccept) {
+  btnRequestAccept.addEventListener('click', () => {
+    sendToCpp('accept_transfer');
+    window.closeModal('modal-transfer-request');
+  });
+}
+
+const btnRequestDecline = document.getElementById('btn-request-decline');
+if (btnRequestDecline) {
+  btnRequestDecline.addEventListener('click', () => {
+    sendToCpp('reject_transfer');
+    window.closeModal('modal-transfer-request');
   });
 }
 
@@ -608,7 +670,7 @@ function renderPeers() {
           <span>${peer.ip}:${peer.port}</span>
         </div>
       </div>
-      <button class="btn-primary-gradient" style="padding: 7px 16px; font-size: 0.82rem;" onclick="sendToPeer('${peer.ip}', ${peer.port})">
+      <button class="btn-primary-gradient" style="padding: 7px 16px; font-size: 0.82rem;" onclick="sendToPeer('${peer.ip}', ${peer.port}, '${(peer.alias || '').replace(/'/g, "\\'")}')">
         Send
       </button>
     `;
@@ -616,18 +678,19 @@ function renderPeers() {
   });
 }
 
-window.sendToPeer = function(peerIp, peerPort) {
+window.sendToPeer = function(peerIp, peerPort, peerAlias) {
   if (selectedFiles.length === 0) {
     alert('Please select files first using the selection grid above!');
     return;
   }
+  const targetName = peerAlias || peerIp;
   const filePaths = selectedFiles.map(f => f.path);
-  sendToCpp('send_files', { peerIp, peerPort, files: filePaths });
+  sendToCpp('send_files', { peerIp, peerPort, peerAlias: targetName, files: filePaths });
 
   // Display sending progress right away
   updateLiveTransferUI({
-    title: `Sending to ${peerIp}...`,
-    fileName: selectedFiles[0]?.name || 'Files',
+    title: `Sending to ${targetName}...`,
+    fileName: 'Waiting for receiver to accept...',
     percentage: 0,
     transferredBytes: 0,
     totalBytes: selectedFiles.reduce((acc, f) => acc + (f.size || 0), 0),
@@ -1154,10 +1217,53 @@ if (window.chrome && window.chrome.webview) {
     }
     else if (data.type === 'transfer_event') {
       const ev = data;
-      if (ev.eventType === 'progress') {
+      if (ev.eventType === 'incoming_request') {
+        // Desktop notification if minimized or backgrounded
+        if (window.Notification && Notification.permission === 'granted') {
+          try {
+            new Notification(`Incoming Transfer: ${ev.peerAlias || 'Nearby Device'}`, {
+              body: `${ev.fileCount || 1} file(s) (${formatBytes(ev.totalBytes || 0)})\nClick to view and accept.`,
+              icon: 'logo.svg'
+            });
+          } catch {}
+        } else if (window.Notification && Notification.permission !== 'denied') {
+          try { Notification.requestPermission(); } catch {}
+        }
+
+        const reqAlias = document.getElementById('request-sender-alias');
+        if (reqAlias) reqAlias.innerText = ev.peerAlias || 'Nearby Device';
+
+        const reqIp = document.getElementById('request-sender-ip');
+        if (reqIp) reqIp.innerText = ev.peerIp || '';
+
+        const reqCount = document.getElementById('request-files-count');
+        if (reqCount) reqCount.innerText = `${ev.fileCount || 1} file(s)`;
+
+        const reqTotal = document.getElementById('request-total-size');
+        if (reqTotal) reqTotal.innerText = formatBytes(ev.totalBytes || 0);
+
+        const reqPreview = document.getElementById('request-files-preview');
+        if (reqPreview) {
+          reqPreview.innerHTML = '';
+          const fnames = ev.fileNames || [];
+          if (fnames.length > 0) {
+            fnames.forEach(fn => {
+              const item = document.createElement('div');
+              item.className = 'request-file-item';
+              item.innerHTML = `<span>📄</span> <span>${fn}</span>`;
+              reqPreview.appendChild(item);
+            });
+          } else {
+            reqPreview.innerHTML = `<div class="request-file-item"><span>📄</span> <span>Incoming file(s)</span></div>`;
+          }
+        }
+
+        window.openModal('modal-transfer-request');
+      }
+      else if (ev.eventType === 'progress') {
         const isReceiving = ev.peerAlias && ev.peerAlias.toLowerCase().includes('receiving');
 
-        // Automatically switch to Receive tab if incoming file from mobile
+        // Automatically switch to Receive tab if incoming file from mobile or peer
         if (isReceiving) {
           const receiveNavBtn = document.querySelector('.nav-btn[data-tab="receive"]');
           if (receiveNavBtn && !receiveNavBtn.classList.contains('active')) {
@@ -1170,7 +1276,7 @@ if (window.chrome && window.chrome.webview) {
         const etaSec = (speedBytes > 0 && remainingBytes > 0) ? Math.ceil(remainingBytes / speedBytes) : 0;
 
         updateLiveTransferUI({
-          title: isReceiving ? (ev.peerAlias || 'Receiving File...') : (ev.peerAlias || 'Sending File...'),
+          title: ev.peerAlias || (isReceiving ? 'Receiving File...' : 'Sending File...'),
           fileName: ev.currentFileName || 'Transferring...',
           percentage: ev.progressPercent,
           transferredBytes: ev.bytesTransferred,
@@ -1180,9 +1286,11 @@ if (window.chrome && window.chrome.webview) {
         });
       }
       else if (ev.eventType === 'complete') {
+        window.closeModal('modal-transfer-request');
         completeLiveTransferUI(ev.currentFileName || ev.peerAlias || 'File Transfer', ev.totalBytes);
       }
       else if (ev.eventType === 'error') {
+        window.closeModal('modal-transfer-request');
         errorLiveTransferUI(ev.message || 'Transfer interrupted');
       }
     }

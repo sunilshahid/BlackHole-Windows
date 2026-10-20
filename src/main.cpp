@@ -143,6 +143,21 @@ static std::vector<std::string> BrowseForFiles(HWND parent) {
     return results;
 }
 
+static void NotifyIncomingTransfer(HWND hWnd, const std::string& senderAlias, int numFiles, int64_t totalBytes) {
+    if (!hWnd) return;
+
+    if (IsIconic(hWnd) || GetForegroundWindow() != hWnd) {
+        FLASHWINFO fwi = { sizeof(FLASHWINFO) };
+        fwi.hwnd = hWnd;
+        fwi.dwFlags = FLASHW_ALL | FLASHW_TIMERNOFG;
+        fwi.uCount = 0;
+        fwi.dwTimeout = 0;
+        FlashWindowEx(&fwi);
+
+        MessageBeep(MB_ICONINFORMATION);
+    }
+}
+
 // Handle messages received from JavaScript via window.chrome.webview.postMessage
 static void HandleWebMessage(const std::string& msgJson) {
     try {
@@ -234,12 +249,13 @@ static void HandleWebMessage(const std::string& msgJson) {
     else if (action == "send_files") {
         std::string peerIp = req.get("peerIp").asString();
         int peerPort = req.get("peerPort").asInt(53317);
+        std::string peerAlias = req.get("peerAlias").asString();
         BlackHole::JsonValue filesVal = req.get("files");
         std::vector<std::string> filePaths;
         for (auto const& f : filesVal.arrVal) {
             filePaths.push_back(f.asString());
         }
-        g_network->sendFilesToPeer(peerIp, peerPort, filePaths);
+        g_network->sendFilesToPeer(peerIp, peerPort, filePaths, peerAlias);
     }
     else if (action == "accept_transfer") {
         g_network->acceptIncomingTransfer();
@@ -337,6 +353,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             g_controller->put_Bounds(bounds);
         }
         break;
+    case WM_ACTIVATE:
+    case WM_SETFOCUS: {
+        FLASHWINFO fwi = { sizeof(FLASHWINFO) };
+        fwi.hwnd = hWnd;
+        fwi.dwFlags = FLASHW_STOP;
+        FlashWindowEx(&fwi);
+        break;
+    }
     case WM_APP_POST_JSON: {
         std::vector<std::wstring> msgs;
         {
@@ -576,6 +600,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     });
 
     g_network->setTransferCallback([](const BlackHole::TransferEvent& ev) {
+        if (ev.type == "incoming_request") {
+            NotifyIncomingTransfer(g_hWnd, ev.peerAlias, ev.fileCount, ev.totalBytes);
+        }
+
         BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
         resp.set("type", "transfer_event");
         resp.set("eventType", ev.type);
@@ -587,6 +615,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         resp.set("speedMBs", ev.speedMBs);
         resp.set("progressPercent", ev.progressPercent);
         resp.set("message", ev.message);
+        resp.set("fileCount", ev.fileCount);
+
+        BlackHole::JsonValue fNames = BlackHole::JsonValue::Array();
+        for (const auto& fn : ev.fileNames) {
+            fNames.push(fn);
+        }
+        resp.set("fileNames", fNames);
+
         PostJsonToWebview(resp.serialize());
     });
 

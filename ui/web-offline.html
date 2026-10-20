@@ -935,6 +935,32 @@
 
       const card = document.getElementById('upload-progress-card');
       card.style.display = 'block';
+      document.getElementById('upload-card-title').innerText = 'Waiting for PC to accept...';
+      document.getElementById('upload-card-file').innerText = `${stagedFiles.length} file(s) queued`;
+
+      // Request permission from receiver PC
+      try {
+        const totalSize = stagedFiles.reduce((acc, f) => acc + f.size, 0);
+        const prepResp = await fetch('/api/prepare-upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            alias: 'Mobile Web Device',
+            count: stagedFiles.length,
+            size: totalSize,
+            files: stagedFiles.map(f => ({ name: f.name, size: f.size }))
+          })
+        });
+        const prepData = await prepResp.json();
+        if (prepData.status === 'REJECTED') {
+          alert('Transfer declined by the PC.');
+          btnUpload.disabled = false;
+          card.style.display = 'none';
+          return;
+        }
+      } catch (e) {
+        console.warn('Prepare upload check skipped:', e);
+      }
 
       for (let i = 0; i < stagedFiles.length; i++) {
         if (isUploadCancelled) break;

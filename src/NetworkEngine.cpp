@@ -307,6 +307,11 @@ void NetworkEngine::handleIncomingConnection(uintptr_t clientSockRaw, std::strin
     int64_t totalBytes = header.get("totalBytes").asInt64(0);
     JsonValue filesArr = header.get("files");
 
+    std::vector<std::string> fnames;
+    for (auto const& fObj : filesArr.arrVal) {
+        fnames.push_back(fObj.get("name").asString("file"));
+    }
+
     std::string destDir;
     bool quickSave;
     {
@@ -325,12 +330,14 @@ void NetworkEngine::handleIncomingConnection(uintptr_t clientSockRaw, std::strin
         ev.peerIp = clientIp;
         ev.peerAlias = senderAlias;
         ev.totalBytes = totalBytes;
+        ev.fileCount = static_cast<int>(filesArr.arrVal.size());
+        ev.fileNames = fnames;
         ev.message = "Incoming transfer request from " + senderAlias;
         if (onTransferEvent) onTransferEvent(ev);
 
-        // Wait up to 30 seconds for user action
+        // Wait up to 60 seconds for user action
         int elapsed = 0;
-        while (!pendingTransferAccepted && !pendingTransferRejected && elapsed < 300 && isRunning) {
+        while (!pendingTransferAccepted && !pendingTransferRejected && elapsed < 600 && isRunning) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             elapsed++;
         }
@@ -401,7 +408,7 @@ void NetworkEngine::handleIncomingConnection(uintptr_t clientSockRaw, std::strin
             TransferEvent prog;
             prog.type = "progress";
             prog.peerIp = clientIp;
-            prog.peerAlias = senderAlias;
+            prog.peerAlias = "Receiving from " + senderAlias;
             prog.currentFileName = fileName;
             prog.bytesTransferred = totalBytesReceived;
             prog.totalBytes = totalBytes;
@@ -428,7 +435,8 @@ void NetworkEngine::handleIncomingConnection(uintptr_t clientSockRaw, std::strin
     TransferEvent done;
     done.type = "complete";
     done.peerIp = clientIp;
-    done.peerAlias = senderAlias;
+    done.peerAlias = "Received from " + senderAlias;
+    done.currentFileName = (filesArr.arrVal.size() == 1) ? filesArr.arrVal[0].get("name").asString() : std::to_string(filesArr.arrVal.size()) + " files";
     done.totalBytes = totalBytes;
     done.progressPercent = 100;
     done.message = "Transfer completed successfully!";
@@ -447,18 +455,49 @@ void NetworkEngine::cancelTransfer() {
     cancelCurrentTransfer = true;
 }
 
-bool NetworkEngine::sendFilesToPeer(const std::string& peerIp, int peerPort, const std::vector<std::string>& filePaths) {
+bool NetworkEngine::sendFilesToPeer(const std::string& peerIp, int peerPort, const std::vector<std::string>& filePaths, const std::string& targetAlias) {
     if (clientTransferThread.joinable()) {
         clientTransferThread.join();
     }
 
     cancelCurrentTransfer = false;
 
-    clientTransferThread = std::thread([this, peerIp, peerPort, filePaths]() {
+    clientTransferThread = std::thread([this, peerIp, peerPort, filePaths, targetAlias]() {
+        std::string displayTarget = !targetAlias.empty() ? targetAlias : peerIp;
+
+        // Gather file metadata first
+        JsonValue filesArr = JsonValue::Array();
+        int64_t totalBytes = 0;
+        for (auto const& pathStr : filePaths) {
+            std::filesystem::path p(pathStr);
+            if (!std::filesystem::exists(p)) continue;
+            int64_t sz = std::filesystem::file_size(p);
+            totalBytes += sz;
+
+            JsonValue f = JsonValue::Object();
+            f.set("name", p.filename().string());
+            f.set("size", sz);
+            filesArr.push(f);
+        }
+
+        // Emit initial status: Connecting and waiting for receiver to accept
+        TransferEvent startEv;
+        startEv.type = "progress";
+        startEv.peerIp = peerIp;
+        startEv.peerAlias = "Sending to " + displayTarget;
+        startEv.currentFileName = "Waiting for " + displayTarget + " to accept...";
+        startEv.bytesTransferred = 0;
+        startEv.totalBytes = totalBytes;
+        startEv.speedMBs = 0.0;
+        startEv.progressPercent = 0;
+        if (onTransferEvent) onTransferEvent(startEv);
+
         SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (sock == INVALID_SOCKET) {
             TransferEvent ev;
             ev.type = "error";
+            ev.peerIp = peerIp;
+            ev.peerAlias = "Sending to " + displayTarget;
             ev.message = "Failed to create socket.";
             if (onTransferEvent) onTransferEvent(ev);
             return;
@@ -477,24 +516,11 @@ bool NetworkEngine::sendFilesToPeer(const std::string& peerIp, int peerPort, con
             closesocket(sock);
             TransferEvent ev;
             ev.type = "error";
-            ev.message = "Could not connect to peer at " + peerIp;
+            ev.peerIp = peerIp;
+            ev.peerAlias = "Sending to " + displayTarget;
+            ev.message = "Could not connect to " + displayTarget;
             if (onTransferEvent) onTransferEvent(ev);
             return;
-        }
-
-        // Gather file metadata
-        JsonValue filesArr = JsonValue::Array();
-        int64_t totalBytes = 0;
-        for (auto const& pathStr : filePaths) {
-            std::filesystem::path p(pathStr);
-            if (!std::filesystem::exists(p)) continue;
-            int64_t sz = std::filesystem::file_size(p);
-            totalBytes += sz;
-
-            JsonValue f = JsonValue::Object();
-            f.set("name", p.filename().string());
-            f.set("size", sz);
-            filesArr.push(f);
         }
 
         std::string myAlias;
@@ -523,7 +549,9 @@ bool NetworkEngine::sendFilesToPeer(const std::string& peerIp, int peerPort, con
             closesocket(sock);
             TransferEvent ev;
             ev.type = "error";
-            ev.message = "Peer did not respond.";
+            ev.peerIp = peerIp;
+            ev.peerAlias = "Sending to " + displayTarget;
+            ev.message = displayTarget + " did not respond.";
             if (onTransferEvent) onTransferEvent(ev);
             return;
         }
@@ -536,7 +564,9 @@ bool NetworkEngine::sendFilesToPeer(const std::string& peerIp, int peerPort, con
             closesocket(sock);
             TransferEvent ev;
             ev.type = "error";
-            ev.message = "Peer rejected the transfer.";
+            ev.peerIp = peerIp;
+            ev.peerAlias = "Sending to " + displayTarget;
+            ev.message = displayTarget + " declined the transfer.";
             if (onTransferEvent) onTransferEvent(ev);
             return;
         }
@@ -569,6 +599,8 @@ bool NetworkEngine::sendFilesToPeer(const std::string& peerIp, int peerPort, con
                     closesocket(sock);
                     TransferEvent ev;
                     ev.type = "error";
+                    ev.peerIp = peerIp;
+                    ev.peerAlias = "Sending to " + displayTarget;
                     ev.message = "Transfer connection lost.";
                     if (onTransferEvent) onTransferEvent(ev);
                     return;
@@ -585,6 +617,7 @@ bool NetworkEngine::sendFilesToPeer(const std::string& peerIp, int peerPort, con
                 TransferEvent prog;
                 prog.type = "progress";
                 prog.peerIp = peerIp;
+                prog.peerAlias = "Sending to " + displayTarget;
                 prog.currentFileName = fileName;
                 prog.bytesTransferred = totalBytesSent;
                 prog.totalBytes = totalBytes;
@@ -602,15 +635,19 @@ bool NetworkEngine::sendFilesToPeer(const std::string& peerIp, int peerPort, con
         if (cancelCurrentTransfer) {
             TransferEvent ev;
             ev.type = "error";
+            ev.peerIp = peerIp;
+            ev.peerAlias = "Sending to " + displayTarget;
             ev.message = "Transfer canceled.";
             if (onTransferEvent) onTransferEvent(ev);
         } else {
             TransferEvent done;
             done.type = "complete";
             done.peerIp = peerIp;
+            done.peerAlias = "Sent to " + displayTarget;
+            done.currentFileName = (filePaths.size() == 1) ? std::filesystem::path(filePaths[0]).filename().string() : std::to_string(filePaths.size()) + " files";
             done.totalBytes = totalBytes;
             done.progressPercent = 100;
-            done.message = "Transfer completed successfully!";
+            done.message = "Successfully sent to " + displayTarget;
             if (onTransferEvent) onTransferEvent(done);
         }
     });
@@ -855,6 +892,70 @@ void NetworkEngine::handleHttpRequest(uintptr_t clientSockRaw, const std::string
         }
         std::string notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         send(sock, notFound.c_str(), static_cast<int>(notFound.size()), 0);
+        closesocket(sock);
+        return;
+    }
+
+    // 3b. Mobile upload preparation and permission check
+    if (method == "POST" && path == "/api/prepare-upload") {
+        std::string reqBody = bodyInitial;
+        if (headers.count("content-length")) {
+            size_t clen = static_cast<size_t>(std::atoll(headers["content-length"].c_str()));
+            while (reqBody.size() < clen) {
+                int r = recv(sock, buf, sizeof(buf), 0);
+                if (r <= 0) break;
+                reqBody.append(buf, r);
+            }
+        }
+
+        JsonValue req = JsonParser::parse(reqBody);
+        std::string senderAlias = req.get("alias").asString("Mobile Web Device");
+        int fileCount = req.get("count").asInt(1);
+        int64_t totalBytes = req.get("size").asInt64(0);
+        std::vector<std::string> fnames;
+        if (req.has("files")) {
+            for (auto const& f : req.get("files").arrVal) {
+                fnames.push_back(f.get("name").asString("file"));
+            }
+        }
+
+        bool quickSave;
+        {
+            std::lock_guard<std::mutex> lock(settingsMutex);
+            quickSave = settings.quickSave;
+        }
+
+        if (!quickSave) {
+            pendingTransferAccepted = false;
+            pendingTransferRejected = false;
+
+            TransferEvent ev;
+            ev.type = "incoming_request";
+            ev.peerIp = clientIp;
+            ev.peerAlias = senderAlias;
+            ev.totalBytes = totalBytes;
+            ev.fileCount = fileCount;
+            ev.fileNames = fnames;
+            ev.message = "Incoming mobile transfer request";
+            if (onTransferEvent) onTransferEvent(ev);
+
+            // Wait up to 60 seconds for user response
+            int elapsed = 0;
+            while (!pendingTransferAccepted && !pendingTransferRejected && elapsed < 600 && isRunning) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                elapsed++;
+            }
+
+            if (!pendingTransferAccepted) {
+                std::string resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{\"status\":\"REJECTED\"}";
+                send(sock, resp.c_str(), static_cast<int>(resp.size()), 0);
+                closesocket(sock);
+                return;
+            }
+        }
+
+        std::string resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{\"status\":\"ACCEPTED\"}";
+        send(sock, resp.c_str(), static_cast<int>(resp.size()), 0);
         closesocket(sock);
         return;
     }

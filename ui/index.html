@@ -130,6 +130,55 @@
           </div>
         </div>
 
+        <!-- LIVE SENDER / IN-PROGRESS TRANSFER CARD -->
+        <div class="live-transfer-panel" id="send-live-panel" style="display: none;">
+          <div class="transfer-panel-top">
+            <div class="transfer-info-left">
+              <div class="pulse-icon-box cyan-pulse">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </div>
+              <div>
+                <h3 class="transfer-headline" id="send-live-title">Sending File...</h3>
+                <p class="transfer-subline" id="send-live-file">photo_123.jpg</p>
+              </div>
+            </div>
+            <button class="btn-cancel-transfer" id="btn-send-cancel-transfer">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              Cancel
+            </button>
+          </div>
+
+          <div class="transfer-metric-line">
+            <span class="live-big-pct" id="send-live-pct">0%</span>
+            <span class="live-byte-count" id="send-live-bytes">0 B / 0 B</span>
+          </div>
+
+          <div class="meter-rail">
+            <div class="meter-bar" id="send-live-fill"></div>
+          </div>
+
+          <div class="stats-2col">
+            <div class="stat-pill">
+              <div class="stat-pill-icon cyan">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+              </div>
+              <div class="stat-meta">
+                <span class="stat-lbl">Transfer Speed</span>
+                <span class="stat-val" id="send-live-speed">0.0 MB/s</span>
+              </div>
+            </div>
+            <div class="stat-pill">
+              <div class="stat-pill-icon purple">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              </div>
+              <div class="stat-meta">
+                <span class="stat-lbl">Time Remaining</span>
+                <span class="stat-val" id="send-live-eta">--</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 2. Nearby Devices (With Action Icons Header) -->
         <div class="section-group">
           <div class="section-header">
@@ -496,6 +545,49 @@
       <div class="popup-footer space-between">
         <button class="btn-text-danger" onclick="clearAllFiles(); closeModal('modal-file-list');">Clear All</button>
         <button class="btn-popup-confirm" onclick="closeModal('modal-file-list')">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- MODAL 6: INCOMING TRANSFER REQUEST CONFIRMATION -->
+  <!-- ============================================== -->
+  <div class="modal-overlay" id="modal-transfer-request">
+    <div class="modal-box modal-box-request">
+      <div class="request-pulse-wrap">
+        <div class="request-pulse-ring"></div>
+        <div class="request-icon-box">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </div>
+      </div>
+
+      <h3 class="modal-title" style="text-align: center; margin-top: 14px; margin-bottom: 4px;">Incoming Transfer Request</h3>
+      <p class="popup-hint" style="text-align: center; margin-bottom: 16px;">
+        <span id="request-sender-alias" style="color: #ffffff; font-weight: 700; font-size: 1.05rem;">Sender Alias</span>
+        <span id="request-sender-ip" style="display: block; font-size: 0.78rem; color: var(--text-muted); font-family: monospace; margin-top: 2px;">192.168.1.100</span>
+      </p>
+
+      <div class="request-meta-card">
+        <div class="request-meta-row">
+          <span class="request-meta-lbl">Files to Receive:</span>
+          <span class="request-meta-val" id="request-files-count">1 file</span>
+        </div>
+        <div class="request-meta-row">
+          <span class="request-meta-lbl">Total Size:</span>
+          <span class="request-meta-val" id="request-total-size">0 B</span>
+        </div>
+        <div class="request-files-preview" id="request-files-preview"></div>
+      </div>
+
+      <div class="request-actions-row">
+        <button class="btn-request-decline" id="btn-request-decline">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          Decline
+        </button>
+        <button class="btn-request-accept" id="btn-request-accept">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          Accept &amp; Receive
+        </button>
       </div>
     </div>
   </div>

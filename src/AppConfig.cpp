@@ -75,7 +75,7 @@ AppSettings ConfigManager::load() {
     JsonValue json = JsonParser::parse(content);
     if (json.has("alias")) s.alias = json.get("alias").asString(s.alias);
     if (json.has("destinationFolder")) s.destinationFolder = json.get("destinationFolder").asString(s.destinationFolder);
-    if (json.has("quickSave")) s.quickSave = json.get("quickSave").asBool(s.quickSave);
+    if (json.has("quickSave")) s.quickSave = json.get("quickSave").asBool(false);
     if (json.has("port")) s.port = json.get("port").asInt(s.port);
     if (json.has("encryptionEnabled")) s.encryptionEnabled = json.get("encryptionEnabled").asBool(s.encryptionEnabled);
     if (json.has("minimizeToTray")) s.minimizeToTray = json.get("minimizeToTray").asBool(s.minimizeToTray);
