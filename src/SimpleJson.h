@@ -104,7 +104,7 @@ public:
             }
             case JsonType::String: {
                 ss << "\"";
-                for (char c : strVal) {
+                for (unsigned char c : strVal) {
                     if (c == '"') ss << "\\\"";
                     else if (c == '\\') ss << "\\\\";
                     else if (c == '\b') ss << "\\b";
@@ -112,7 +112,12 @@ public:
                     else if (c == '\n') ss << "\\n";
                     else if (c == '\r') ss << "\\r";
                     else if (c == '\t') ss << "\\t";
-                    else ss << c;
+                    else if (c < 0x20) {
+                        char hex[7];
+                        sprintf_s(hex, "\\u%04x", (unsigned int)c);
+                        ss << hex;
+                    }
+                    else ss << (char)c;
                 }
                 ss << "\"";
                 break;
@@ -181,19 +186,24 @@ private:
         if (c == 't' || c == 'f') return parseBool();
         if (c == 'n') return parseNull();
         if (c == '-' || std::isdigit(static_cast<unsigned char>(c))) return parseNumber();
+        if (pos < src.size()) pos++; // consume unexpected char to guarantee forward progress
         return JsonValue();
     }
 
     JsonValue parseObject() {
         JsonValue obj = JsonValue::Object();
         get(); // consume '{'
-        while (true) {
+        while (pos < src.size()) {
             char c = peek();
             if (c == '}' || c == '\0') {
                 if (c == '}') get();
                 break;
             }
             if (c == ',') {
+                get();
+                continue;
+            }
+            if (c != '"') {
                 get();
                 continue;
             }
@@ -210,7 +220,7 @@ private:
     JsonValue parseArray() {
         JsonValue arr = JsonValue::Array();
         get(); // consume '['
-        while (true) {
+        while (pos < src.size()) {
             char c = peek();
             if (c == ']' || c == '\0') {
                 if (c == ']') get();
@@ -261,20 +271,23 @@ private:
     }
 
     JsonValue parseBool() {
-        if (src.substr(pos, 4) == "true") {
+        if (pos + 4 <= src.size() && src.substr(pos, 4) == "true") {
             pos += 4;
             return JsonValue(true);
         }
-        if (src.substr(pos, 5) == "false") {
+        if (pos + 5 <= src.size() && src.substr(pos, 5) == "false") {
             pos += 5;
             return JsonValue(false);
         }
+        if (pos < src.size()) pos++;
         return JsonValue(false);
     }
 
     JsonValue parseNull() {
-        if (src.substr(pos, 4) == "null") {
+        if (pos + 4 <= src.size() && src.substr(pos, 4) == "null") {
             pos += 4;
+        } else if (pos < src.size()) {
+            pos++;
         }
         return JsonValue();
     }

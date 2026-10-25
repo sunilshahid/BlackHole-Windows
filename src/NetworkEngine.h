@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 #include <mutex>
 #include <thread>
 #include <atomic>
@@ -14,7 +15,11 @@ struct PeerDevice {
     std::string ip;
     int port = 53317;
     std::string alias;
+    std::string deviceModel = "PC";
     std::string deviceType = "desktop";
+    std::string fingerprint;
+    std::string protocol = "blackhole";
+    bool isHttps = false;
     int64_t lastSeen = 0;
 };
 
@@ -34,6 +39,7 @@ struct TransferEvent {
     double speedMBs = 0.0;
     int progressPercent = 0;
     std::string message;
+    std::string textContent;
     int fileCount = 0;
     std::vector<std::string> fileNames;
 };
@@ -60,10 +66,13 @@ private:
     TransferCallback onTransferEvent;
     std::atomic<bool> pendingTransferAccepted{false};
     std::atomic<bool> pendingTransferRejected{false};
+    std::atomic<bool> pendingTextAccepted{false};
+    std::atomic<bool> pendingTextRejected{false};
 
     // Client Transfer Thread
     std::thread clientTransferThread;
     std::atomic<bool> cancelCurrentTransfer{false};
+    std::atomic<uintptr_t> activeClientSock{ (uintptr_t)(~0ULL) }; // INVALID_SOCKET
 
 public:
     NetworkEngine();
@@ -81,15 +90,31 @@ public:
 
     void acceptIncomingTransfer();
     void rejectIncomingTransfer();
+    void acceptIncomingText() { pendingTextAccepted = true; }
+    void rejectIncomingText() { pendingTextRejected = true; }
 
-    bool sendFilesToPeer(const std::string& peerIp, int peerPort, const std::vector<std::string>& filePaths, const std::string& targetAlias = "");
+    bool sendFilesToPeer(const std::string& peerIp, int peerPort, const std::vector<std::string>& filePaths, const std::string& targetAlias = "", const std::string& protocol = "blackhole");
     void cancelTransfer();
+
+    void setFavoriteFingerprints(const std::vector<std::string>& fps);
+    std::string getDeviceFingerprint();
 
     // Local Web Link Sharing (Bidirectional Local HTTP Server)
     void setSharedFiles(const std::vector<std::string>& files);
     std::vector<std::string> getSharedFiles();
 
 private:
+    std::set<std::string> favoriteFingerprints;
+    std::mutex favoritesMutex;
+    struct LocalSendFileInfo {
+        std::string fileName;
+        int64_t size = 0;
+        std::string fileId;
+    };
+    std::map<std::string, std::map<std::string, LocalSendFileInfo>> pendingLocalSendUploads;
+    std::map<std::string, std::string> sessionSenderAliases;
+    std::mutex pendingUploadsMutex;
+
     void runUdpBroadcaster();
     void runUdpListener();
     void runTcpServer();

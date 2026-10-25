@@ -11,7 +11,7 @@ Release/
 *.useroscan
 *.sln.docstates
 
-# CMake build outputs
+# CMake & build outputs
 build/
 cmake-build-*/
 CMakeCache.txt
@@ -22,19 +22,30 @@ CMakeScripts/
 *.obj
 *.o
 *.lib
-*.a
+!packages/**/WebView2LoaderStatic.lib
 *.pdb
 *.ilk
 *.idb
+*.res
 
-# Preserve vendor packages
-!packages/**
-
-# Executables & Binaries (distribute via GitHub Releases)
+# Distribution & Installer outputs (distribute via GitHub Releases)
+dist/
 *.exe
 *.dll
+*.zip
+*.7z
+*.rar
+*.tar.gz
 
-# OS metadata
+# Ignore NuGet bloat inside packages
+packages/**/lib/
+packages/**/lib_manual/
+packages/**/runtimes/
+packages/**/tools/
+
+# OS metadata & logs
 .DS_Store
 Thumbs.db
 desktop.ini
+*.log
+*.tmp

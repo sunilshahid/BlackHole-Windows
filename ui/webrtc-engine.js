@@ -372,7 +372,7 @@ class WebRTCManager {
   async addCandidateInternal(candidateInit) {
     if (!this.pc) return;
     try {
-      await this.pc.addIceCandidate(new RTCIceCandidate(candidateInit));
+      await this.pc.addIceCandidate(new RTCIceCandidate(candidateInit)).catch(() => {});
 
       const candStr = candidateInit.candidate;
       if (!candStr) return;
@@ -394,17 +394,22 @@ class WebRTCManager {
       if (candStr.includes('typ srflx')) {
         const raddrMatch = candStr.match(/raddr\s+(\d+\.\d+\.\d+\.\d+)/);
         const rportMatch = candStr.match(/rport\s+(\d+)/);
-        if (raddrMatch && rportMatch && isPrivateIp(raddrMatch[1])) {
-          const synthetic = candStr
-            .replace(/typ srflx/, 'typ host')
-            .replace(/(\d+\.\d+\.\d+\.\d+)\s+(\d+)\s+typ host/, `${raddrMatch[1]} ${rportMatch[1]} typ host`);
-          
-          console.log('[WebRTC LAN Synthesis] Injecting direct LAN route from remote STUN raddr:', raddrMatch[1], rportMatch[1]);
-          await this.pc.addIceCandidate(new RTCIceCandidate({
-            candidate: synthetic,
-            sdpMid: candidateInit.sdpMid,
-            sdpMLineIndex: candidateInit.sdpMLineIndex,
-          })).catch(() => {});
+        if (raddrMatch && isPrivateIp(raddrMatch[1])) {
+          if (!this.remoteLocalIps.includes(raddrMatch[1])) {
+            this.remoteLocalIps.push(raddrMatch[1]);
+          }
+          if (rportMatch) {
+            const synthetic = candStr
+              .replace(/typ srflx/, 'typ host')
+              .replace(/(\d+\.\d+\.\d+\.\d+)\s+(\d+)\s+typ host/, `${raddrMatch[1]} ${rportMatch[1]} typ host`);
+            
+            console.log('[WebRTC LAN Synthesis] Injecting direct LAN route from remote STUN raddr:', raddrMatch[1], rportMatch[1]);
+            await this.pc.addIceCandidate(new RTCIceCandidate({
+              candidate: synthetic,
+              sdpMid: candidateInit.sdpMid,
+              sdpMLineIndex: candidateInit.sdpMLineIndex,
+            })).catch(() => {});
+          }
         }
       }
     } catch (err) {
@@ -543,8 +548,17 @@ async function sendFilesWebRTC(files, transport, cryptoKey, onProgress, isCancel
     // Read and encrypt in 1 MB blocks
     const READ_BLOCK_SIZE = 1024 * 1024;
     const readAndEncryptBlock = async (blockStartOffset, startChunkIdx) => {
-      const blockSlice = file.slice(blockStartOffset, blockStartOffset + READ_BLOCK_SIZE);
-      const blockBuffer = await blockSlice.arrayBuffer();
+      let blockBuffer;
+      if (typeof file.slice === 'function') {
+        const blockSlice = file.slice(blockStartOffset, blockStartOffset + READ_BLOCK_SIZE);
+        blockBuffer = await blockSlice.arrayBuffer();
+      } else if (file.path && typeof window.readNativeFileChunk === 'function') {
+        const bytesToRead = Math.min(READ_BLOCK_SIZE, file.size - blockStartOffset);
+        const res = await window.readNativeFileChunk(file.path, blockStartOffset, bytesToRead);
+        blockBuffer = res.buffer;
+      } else {
+        throw new Error(`Unable to read file ${file.name || 'unnamed'}: no slice or native reader available`);
+      }
 
       const promises = [];
       let curIdx = startChunkIdx;
@@ -614,6 +628,7 @@ async function sendFilesWebRTC(files, transport, cryptoKey, onProgress, isCancel
             currentFileIndex: fileIdx,
             totalFiles: files.length,
             currentFileName: file.name,
+            currentFileSize: file.size,
             percentage,
             speedBytesPerSec: rollingSpeed,
             etaSeconds: Math.ceil(eta),
@@ -657,6 +672,10 @@ class FileReceiverWebRTC {
 
     if (packet.type === 'control') {
       const msg = packet.message;
+      if (msg.type === 'RTC_PING') {
+        this.onControlMessage?.(msg);
+        return;
+      }
       if (msg.type === 'MANIFEST') {
         this.manifest = msg;
         this.totalBytes = msg.totalBytes;
@@ -693,6 +712,7 @@ class FileReceiverWebRTC {
           const remainingBytes = this.totalBytes - this.transferredBytes;
           const eta = this.rollingSpeed > 0 ? remainingBytes / this.rollingSpeed : 0;
           const currentFileName = this.manifest?.files[fileIndex]?.name || 'Receiving...';
+          const currentFileSize = this.manifest?.files[fileIndex]?.size || this.totalBytes;
           const percentage = this.totalBytes > 0
             ? Math.min(100, Math.round((this.transferredBytes / this.totalBytes) * 100))
             : 100;
@@ -704,6 +724,7 @@ class FileReceiverWebRTC {
               currentFileIndex: fileIndex,
               totalFiles: this.manifest?.files?.length || 1,
               currentFileName,
+              currentFileSize,
               percentage,
               speedBytesPerSec: this.rollingSpeed,
               etaSeconds: Math.ceil(eta),
@@ -728,6 +749,7 @@ class FileReceiverWebRTC {
       metadata: meta,
       blob,
       downloadUrl,
+      chunks: fileState.chunks,
     };
 
     this.receivedFiles.push(received);

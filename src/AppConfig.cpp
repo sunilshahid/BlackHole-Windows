@@ -75,7 +75,10 @@ AppSettings ConfigManager::load() {
     JsonValue json = JsonParser::parse(content);
     if (json.has("alias")) s.alias = json.get("alias").asString(s.alias);
     if (json.has("destinationFolder")) s.destinationFolder = json.get("destinationFolder").asString(s.destinationFolder);
-    if (json.has("quickSave")) s.quickSave = json.get("quickSave").asBool(false);
+    if (json.has("quickSaveMode")) s.quickSaveMode = json.get("quickSaveMode").asInt(s.quickSave ? 2 : 0);
+    if (json.has("quickSave")) s.quickSave = json.get("quickSave").asBool(s.quickSaveMode == 2);
+    if (s.quickSaveMode == 2) s.quickSave = true;
+    if (json.has("autoCopyText")) s.autoCopyText = json.get("autoCopyText").asBool(true);
     if (json.has("port")) s.port = json.get("port").asInt(s.port);
     if (json.has("encryptionEnabled")) s.encryptionEnabled = json.get("encryptionEnabled").asBool(s.encryptionEnabled);
     if (json.has("minimizeToTray")) s.minimizeToTray = json.get("minimizeToTray").asBool(s.minimizeToTray);
@@ -87,7 +90,9 @@ bool ConfigManager::save(const AppSettings& s) {
     JsonValue json = JsonValue::Object();
     json.set("alias", s.alias);
     json.set("destinationFolder", s.destinationFolder);
-    json.set("quickSave", s.quickSave);
+    json.set("quickSaveMode", s.quickSaveMode);
+    json.set("quickSave", s.quickSave || s.quickSaveMode == 2);
+    json.set("autoCopyText", s.autoCopyText);
     json.set("port", s.port);
     json.set("encryptionEnabled", s.encryptionEnabled);
     json.set("minimizeToTray", s.minimizeToTray);

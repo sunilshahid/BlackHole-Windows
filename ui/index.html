@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BlackHole - Zero-Knowledge Native P2P</title>
+  <title>BlackHole - Zero-Knowledge LAN & P2P</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,22 +14,25 @@
         <img src="logo.svg" alt="BlackHole" class="brand-logo">
         <div class="brand-text">
           <h1>BlackHole</h1>
-          <span>Zero-Knowledge P2P</span>
+          <span>Zero-Knowledge LAN & P2P</span>
         </div>
       </div>
 
       <nav class="sidebar-nav">
-        <button class="nav-btn active" data-tab="send">
+        <button class="nav-btn active" data-tab="receive">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h.01"/>
+            <path d="M2 8.82a15 15 0 0 1 20 0"/>
+            <path d="M5 12.86a10 10 0 0 1 14 0"/>
+            <path d="M8.5 16.43a5 5 0 0 1 7 0"/>
+          </svg>
+          <span>Receive</span>
+        </button>
+        <button class="nav-btn" data-tab="send">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>
           </svg>
           <span>Send</span>
-        </button>
-        <button class="nav-btn" data-tab="receive">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-          <span>Receive</span>
         </button>
         <button class="nav-btn" data-tab="settings">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -54,9 +57,9 @@
       <input type="file" id="file-picker" multiple style="display: none;">
 
       <!-- ============================================== -->
-      <!-- TAB 1: SEND (LocalSend Inspired, Uncluttered) -->
+      <!-- TAB 2: SEND -->
       <!-- ============================================== -->
-      <section id="tab-send" class="tab-pane active">
+      <section id="tab-send" class="tab-pane">
         <!-- 1. Selection Section -->
         <div class="section-group">
           <div class="section-header">
@@ -102,25 +105,30 @@
             </button>
           </div>
 
-          <!-- Active State: Compact Selection Summary Card (LocalSend Style) -->
+          <!-- Active State: Compact Selection Summary Card -->
           <div class="compact-selection-card" id="selection-card-active" style="display: none;">
             <div class="selection-card-top">
-              <div>
-                <div class="selection-count-line" id="compact-files-count">Files: 1</div>
-                <div class="selection-size-line" id="compact-files-size">Size: 12.4 MB</div>
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <div>
+                  <div class="selection-count-line" id="compact-files-count">Files: 1</div>
+                  <div class="selection-size-line" id="compact-files-size">Size: 12.4 MB</div>
+                </div>
+                <button class="btn-pill-subtle" id="btn-compact-edit" style="margin-left: 6px; padding: 4px 12px; font-size: 0.8rem; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                  Edit
+                </button>
               </div>
               <button class="btn-icon-danger" id="btn-compact-clear" title="Clear selection">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             </div>
 
-            <!-- Preview icons / mini pills -->
+            <!-- Preview icons / tiles (Thumbnails, Video clapper, Doc, 3-line Text, App) -->
             <div class="compact-files-preview" id="compact-files-preview"></div>
 
             <div class="selection-card-bottom">
-              <span class="staged-sync-tag" id="compact-sync-status">⚡ Staged for offline hotspot link</span>
+              <span class="staged-sync-tag" id="compact-sync-status">⚡ Ready to send to nearby peer or web link</span>
               <div class="selection-card-actions">
-                <button class="btn-pill-subtle" id="btn-compact-edit">View List</button>
                 <button class="btn-pill-action" id="btn-compact-add">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                   Add
@@ -130,61 +138,18 @@
           </div>
         </div>
 
-        <!-- LIVE SENDER / IN-PROGRESS TRANSFER CARD -->
-        <div class="live-transfer-panel" id="send-live-panel" style="display: none;">
-          <div class="transfer-panel-top">
-            <div class="transfer-info-left">
-              <div class="pulse-icon-box cyan-pulse">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-              </div>
-              <div>
-                <h3 class="transfer-headline" id="send-live-title">Sending File...</h3>
-                <p class="transfer-subline" id="send-live-file">photo_123.jpg</p>
-              </div>
-            </div>
-            <button class="btn-cancel-transfer" id="btn-send-cancel-transfer">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              Cancel
-            </button>
-          </div>
-
-          <div class="transfer-metric-line">
-            <span class="live-big-pct" id="send-live-pct">0%</span>
-            <span class="live-byte-count" id="send-live-bytes">0 B / 0 B</span>
-          </div>
-
-          <div class="meter-rail">
-            <div class="meter-bar" id="send-live-fill"></div>
-          </div>
-
-          <div class="stats-2col">
-            <div class="stat-pill">
-              <div class="stat-pill-icon cyan">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-              </div>
-              <div class="stat-meta">
-                <span class="stat-lbl">Transfer Speed</span>
-                <span class="stat-val" id="send-live-speed">0.0 MB/s</span>
-              </div>
-            </div>
-            <div class="stat-pill">
-              <div class="stat-pill-icon purple">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              </div>
-              <div class="stat-meta">
-                <span class="stat-lbl">Time Remaining</span>
-                <span class="stat-val" id="send-live-eta">--</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <!-- 2. Nearby Devices (With Action Icons Header) -->
         <div class="section-group">
           <div class="section-header">
-            <h2 class="section-title">Nearby devices</h2>
-            <!-- Clean Header Action Icons (LocalSend Parity) -->
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <h2 class="section-title">Nearby devices</h2>
+              <span class="badge" id="peer-count-badge" style="display: none; background: rgba(139, 92, 246, 0.2); color: #c4b5fd; font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; font-weight: 700; border: 1px solid rgba(139, 92, 246, 0.3);">0</span>
+            </div>
+            <!-- Clean Header Action Icons -->
             <div class="header-action-icons">
+              <button class="action-circle-btn" id="btn-open-favorites" title="Favorites" style="color: #f43f5e;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+              </button>
               <button class="action-circle-btn" id="btn-rescan-peers" title="Rescan network">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
               </button>
@@ -194,7 +159,7 @@
               <button class="action-circle-btn" id="btn-open-share-link" title="Share via link (Offline Hotspot Portal)">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
               </button>
-              <button class="action-circle-btn" id="btn-open-remote-share" title="Remote Share (Room Code)">
+              <button class="action-circle-btn" id="btn-open-remote-share" title="Remote Share (Send with Room Code)">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
               </button>
             </div>
@@ -216,119 +181,41 @@
       </section>
 
       <!-- ============================================== -->
-      <!-- TAB 2: RECEIVE (Clean, Focused, Live Progress) -->
+      <!-- TAB 1: RECEIVE (Centered Black Hole Cosmic Suction) -->
       <!-- ============================================== -->
-      <section id="tab-receive" class="tab-pane">
-        <!-- Hero Header -->
-        <div class="receive-hero-header">
-          <div class="hero-radar-box">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+      <section id="tab-receive" class="tab-pane active" style="position: relative;">
+        <!-- Top Right Favorites Button -->
+        <div style="position: absolute; top: 16px; right: 24px; z-index: 10;">
+          <button class="action-circle-btn" id="btn-receive-favorites" title="Favorites" style="width: 38px; height: 38px; border-radius: 50%; color: #f43f5e; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(244, 63, 94, 0.3);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+          </button>
+        </div>
+        <div class="receive-vacuum-wrapper">
+          <!-- Cosmic Black Hole Suction Animation -->
+          <div class="blackhole-vacuum-stage">
+            <canvas id="bh-stage-canvas" width="220" height="220"></canvas>
+          </div>
+
+          <!-- Device Alias Under Animation -->
+          <h1 class="receive-vacuum-alias" id="receive-alias-label">BlackHole-PC</h1>
+
+          <!-- Badges: #PIN, Windows, IP -->
+          <div class="receive-pills-row">
+            <span class="badge-pill pin-pill" id="receive-pin-badge">#775</span>
+            <span class="badge-pill os-pill">Windows</span>
+            <span class="badge-pill ip-pill" id="receive-ip-badge">127.0.0.1</span>
+          </div>
+
+          <p class="receive-status-subline" id="receive-status-text">Ready to receive incoming transfers</p>
+
+          <!-- Bottom Center Room Code Action Button -->
+          <button class="btn-cosmic-room-code" id="btn-open-code-modal">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
             </svg>
-          </div>
-          <div>
-            <h2 class="receive-alias-heading" id="receive-alias-label">DESKTOP-PC</h2>
-            <div class="receive-status-badge">
-              <span class="status-dot"></span>
-              <span id="receive-status-text">Ready to receive on port 53317</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 3 Quick Action Cards / Entry Points -->
-        <div class="receive-actions-row">
-          <div class="receive-card-pill" id="card-receive-portal">
-            <div class="pill-icon-wrap emerald-tint">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            </div>
-            <div class="pill-info">
-              <div class="pill-title">Mobile Web Portal</div>
-              <div class="pill-sub" id="receive-portal-link-label">http://192.168.0.x:53317</div>
-            </div>
-            <button class="btn-pill-action" id="btn-receive-view-portal">Open</button>
-          </div>
-
-          <div class="receive-card-pill" id="card-receive-code">
-            <div class="pill-icon-wrap purple-tint">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-            </div>
-            <div class="pill-info">
-              <div class="pill-title">Room Code</div>
-              <div class="pill-sub">Connect via 6-digit code</div>
-            </div>
-            <button class="btn-pill-subtle" id="btn-open-code-modal">Enter Code</button>
-          </div>
-
-          <div class="receive-card-pill" id="card-receive-dest">
-            <div class="pill-icon-wrap cyan-tint">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 8 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
-            </div>
-            <div class="pill-info">
-              <div class="pill-title">Save Location</div>
-              <div class="pill-sub truncate-path" id="receive-folder-display">Downloads\BlackHole</div>
-            </div>
-            <button class="btn-pill-subtle" id="btn-open-download-dir">Open</button>
-          </div>
-        </div>
-
-        <!-- LIVE RECEIVING / IN-PROGRESS TRANSFER CARD (Directly on screen!) -->
-        <div class="live-transfer-panel" id="receive-live-panel" style="display: none;">
-          <div class="transfer-panel-top">
-            <div class="transfer-info-left">
-              <div class="pulse-icon-box">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              </div>
-              <div>
-                <h3 class="transfer-headline" id="receive-live-title">Receiving File...</h3>
-                <p class="transfer-subline" id="receive-live-file">photo_123.jpg</p>
-              </div>
-            </div>
-            <button class="btn-cancel-transfer" id="btn-receive-cancel-transfer">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              Cancel
-            </button>
-          </div>
-
-          <div class="transfer-metric-line">
-            <span class="live-big-pct" id="receive-live-pct">0%</span>
-            <span class="live-byte-count" id="receive-live-bytes">0 B / 0 B</span>
-          </div>
-
-          <div class="meter-rail">
-            <div class="meter-bar" id="receive-live-fill"></div>
-          </div>
-
-          <div class="stats-2col">
-            <div class="stat-pill">
-              <div class="stat-pill-icon cyan">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 12-4-4v3H3v2h15v3l4-4Z"/></svg>
-              </div>
-              <div class="stat-meta">
-                <span class="stat-lbl">Transfer Speed</span>
-                <span class="stat-val" id="receive-live-speed">0.0 MB/s</span>
-              </div>
-            </div>
-
-            <div class="stat-pill">
-              <div class="stat-pill-icon purple">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
-              </div>
-              <div class="stat-meta">
-                <span class="stat-lbl">Remaining</span>
-                <span class="stat-val" id="receive-live-eta">--</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Recent Transfers Section -->
-        <div class="section-group" style="margin-top: 18px;">
-          <div class="section-header">
-            <h2 class="section-title">Recent Transfers</h2>
-          </div>
-          <div class="history-container" id="transfer-history">
-            <div class="no-history-text">No recent file transfers yet.</div>
-          </div>
+            <span>Room Code</span>
+          </button>
         </div>
       </section>
 
@@ -364,14 +251,27 @@
             </div>
           </div>
 
-          <!-- Quick Save -->
+          <!-- Auto-Accept Mode -->
           <div class="setting-row">
             <div class="setting-text">
-              <div class="setting-name">Quick Save (Auto-Accept)</div>
-              <div class="setting-sub">Automatically accept and save incoming files without prompt</div>
+              <div class="setting-name">Auto-Accept (Quick Save)</div>
+              <div class="setting-sub">Automatically accept and save incoming files</div>
+            </div>
+            <select id="setting-quick-save-mode" class="setting-select" style="background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.15); padding: 6px 12px; border-radius: 8px; font-weight: 500; cursor: pointer; outline: none;">
+              <option value="0" style="background: #18181b; color: #fff;">Off</option>
+              <option value="1" style="background: #18181b; color: #fff;">Favorites Only</option>
+              <option value="2" style="background: #18181b; color: #fff;">Always</option>
+            </select>
+          </div>
+
+          <!-- Auto-Copy Text -->
+          <div class="setting-row">
+            <div class="setting-text">
+              <div class="setting-name">Auto-Copy Text</div>
+              <div class="setting-sub">Automatically copy received text messages to clipboard</div>
             </div>
             <label class="switch-toggle">
-              <input type="checkbox" id="setting-quick-save" checked>
+              <input type="checkbox" id="setting-auto-copy-text" checked>
               <span class="toggle-slider"></span>
             </label>
           </div>
@@ -397,6 +297,21 @@
               <input type="checkbox" id="setting-encryption" checked>
               <span class="toggle-slider"></span>
             </label>
+          </div>
+
+          <!-- Theme Mode -->
+          <div class="setting-row">
+            <div class="setting-text">
+              <div class="setting-name">Theme</div>
+              <div class="setting-sub">Choose appearance: System (default), Dark, or Light</div>
+            </div>
+            <div class="setting-input-wrapper">
+              <select id="setting-theme" class="input-text" style="width: 140px; cursor: pointer; padding: 6px 12px; border-radius: 8px;">
+                <option value="system">System</option>
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </div>
           </div>
 
           <div class="setting-footer">
@@ -550,44 +465,321 @@
   </div>
 
   <!-- ============================================== -->
-  <!-- MODAL 6: INCOMING TRANSFER REQUEST CONFIRMATION -->
+  <!-- MODAL 6: INCOMING TRANSFER REQUEST -->
   <!-- ============================================== -->
   <div class="modal-overlay" id="modal-transfer-request">
-    <div class="modal-box modal-box-request">
-      <div class="request-pulse-wrap">
-        <div class="request-pulse-ring"></div>
-        <div class="request-icon-box">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        </div>
+    <!-- Main Request Card -->
+    <div class="modal-box modal-box-request" id="request-main-view">
+      <div class="incoming-hero-avatar" id="request-hero-icon-wrap">
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" id="request-device-icon"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
       </div>
 
-      <h3 class="modal-title" style="text-align: center; margin-top: 14px; margin-bottom: 4px;">Incoming Transfer Request</h3>
-      <p class="popup-hint" style="text-align: center; margin-bottom: 16px;">
-        <span id="request-sender-alias" style="color: #ffffff; font-weight: 700; font-size: 1.05rem;">Sender Alias</span>
-        <span id="request-sender-ip" style="display: block; font-size: 0.78rem; color: var(--text-muted); font-family: monospace; margin-top: 2px;">192.168.1.100</span>
-      </p>
+      <h2 class="incoming-hero-alias" id="request-sender-alias">Sunil</h2>
 
-      <div class="request-meta-card">
-        <div class="request-meta-row">
-          <span class="request-meta-lbl">Files to Receive:</span>
-          <span class="request-meta-val" id="request-files-count">1 file</span>
-        </div>
-        <div class="request-meta-row">
-          <span class="request-meta-lbl">Total Size:</span>
-          <span class="request-meta-val" id="request-total-size">0 B</span>
-        </div>
-        <div class="request-files-preview" id="request-files-preview"></div>
+      <div class="incoming-badges-row">
+        <span class="incoming-pill verify-pill" id="request-sender-pin" title="Click to view SHA-256 fingerprint">#102</span>
+        <span class="incoming-pill" id="request-sender-model">Android</span>
+        <span class="incoming-pill" id="request-sender-ip">192.168.1.100</span>
       </div>
 
-      <div class="request-actions-row">
-        <button class="btn-request-decline" id="btn-request-decline">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      <div class="incoming-prompt-text" id="request-prompt-text">wants to send you a file</div>
+
+      <!-- Expandable Options Button -->
+      <div class="incoming-options-wrap">
+        <button class="btn-toggle-options" id="btn-toggle-request-options">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Options</span>
+        </button>
+      </div>
+
+      <!-- Action Buttons Row -->
+      <div class="incoming-actions-row">
+        <button class="btn-pill-decline" id="btn-request-decline">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           Decline
         </button>
-        <button class="btn-request-accept" id="btn-request-accept">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-          Accept &amp; Receive
+        <button class="btn-pill-accept" id="btn-request-accept">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          Accept
         </button>
+      </div>
+    </div>
+
+    <!-- Options Subview (Matching media_1792560802796_d8c1af9d.png) -->
+    <div class="modal-box modal-box-options" id="request-options-subview" style="display: none;">
+      <div class="options-header-bar">
+        <button class="btn-icon-back" id="btn-back-request-options">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <h2 class="options-title">Options</h2>
+      </div>
+
+      <div class="options-body">
+        <div class="options-section">
+          <div class="options-section-label">
+            <span>Save to folder</span>
+            <button class="btn-edit-icon" id="btn-options-change-dir" title="Change folder">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            </button>
+          </div>
+          <div class="options-path-text" id="options-folder-path">Downloads\BlackHole</div>
+        </div>
+
+        <div class="options-section" style="margin-top: 18px;">
+          <div class="options-section-label">
+            <span>Files</span>
+            <div class="options-action-icons">
+              <span class="icon-hint" title="All selected">💡</span>
+            </div>
+          </div>
+          <div class="options-files-list" id="options-files-list">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- MODAL 7: SENDER HANDSHAKE (WAITING FOR RESPONSE) -->
+  <!-- ============================================== -->
+  <div class="modal-overlay" id="modal-sender-handshake">
+    <div class="modal-box modal-box-handshake">
+      <!-- Sender Device Card -->
+      <div class="handshake-card">
+        <div class="handshake-icon-box">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <div class="handshake-meta">
+          <div class="handshake-title" id="handshake-sender-alias">DESKTOP-PC</div>
+          <div class="handshake-pills">
+            <span class="incoming-pill">HTTP</span>
+            <span class="incoming-pill">Windows</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arrow Down -->
+      <div class="handshake-arrow-wrap">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+      </div>
+
+      <!-- Receiver Device Card -->
+      <div class="handshake-card">
+        <div class="handshake-icon-box">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="handshake-target-icon"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+        </div>
+        <div class="handshake-meta">
+          <div class="handshake-title" id="handshake-target-alias">Remote Device</div>
+          <div class="handshake-pills">
+            <span class="incoming-pill" id="handshake-target-proto">HTTP</span>
+            <span class="incoming-pill" id="handshake-target-model">Android</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="handshake-security-badge">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        Verify
+      </div>
+
+      <div class="handshake-status-line">Waiting for response...</div>
+
+      <button class="btn-handshake-cancel" id="btn-handshake-cancel">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        Cancel
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- MODAL 8: CANCEL FILES TRANSFER CONFIRMATION -->
+  <!-- ============================================== -->
+  <div class="modal-overlay" id="modal-cancel-confirm">
+    <div class="modal-box modal-box-cancel">
+      <h3 class="cancel-modal-title">Cancel files transfer</h3>
+      <p class="cancel-modal-hint">Do you really want to cancel the files transfer?</p>
+      <div class="cancel-modal-actions">
+        <button class="btn-cancel-continue" id="btn-cancel-transfer-continue">Continue</button>
+        <button class="btn-cancel-confirm-pill" id="btn-cancel-transfer-abort">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- MODAL 9: MESSAGE / TEXT RECEIVED DIALOG -->
+  <!-- ============================================== -->
+  <div class="modal-overlay" id="modal-message-received">
+    <div class="modal-box modal-box-message">
+      <div class="incoming-hero-avatar">
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" id="msg-device-icon"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+      </div>
+      <h2 class="incoming-hero-alias" id="msg-sender-alias">Sunil</h2>
+      <div class="incoming-badges-row">
+        <span class="incoming-pill" id="msg-sender-model">Android</span>
+      </div>
+      <div class="incoming-prompt-text">sent you a message:</div>
+
+      <div class="message-text-bubble" id="msg-text-content">hello</div>
+
+      <div class="message-actions-row">
+        <button class="btn-pill-verify">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Verify
+        </button>
+        <button class="btn-pill-copy" id="btn-copy-received-msg">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+          <span id="btn-copy-received-msg-lbl">Copy</span>
+        </button>
+      </div>
+
+      <button class="btn-pill-close-subtle" onclick="rejectTextMessageAndClose()">
+        ✕ Close
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- MODAL: COMPOSE TEXT NOTE -->
+  <!-- ============================================== -->
+  <div class="modal-overlay" id="modal-compose-text">
+    <div class="modal-box" style="max-width: 480px; width: 92%; padding: 22px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
+        <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700; color: #fff;">Share Text Note</h3>
+        <button class="btn-icon" onclick="window.closeModal('modal-compose-text')" style="color: var(--text-muted); padding: 4px;">✕</button>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;">Type or paste text, links or code snippets to share:</p>
+      <textarea id="compose-text-input" rows="4" placeholder="Enter message or paste link..." style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15); border-radius: 12px; padding: 12px; color: #fff; font-family: inherit; font-size: 0.92rem; resize: vertical; outline: none;"></textarea>
+      
+      <!-- Recent Notes Memory -->
+      <div id="compose-text-history-section" style="margin-top: 14px; display: none;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+          <span style="font-size: 0.78rem; font-weight: 600; color: var(--accent-cyan);">Recent (Memory):</span>
+          <button id="btn-clear-text-history" style="background: none; border: none; color: var(--text-muted); font-size: 0.75rem; cursor: pointer; text-decoration: underline;">Clear</button>
+        </div>
+        <div id="compose-text-history-list" style="display: flex; flex-wrap: wrap; gap: 6px; max-height: 85px; overflow-y: auto;"></div>
+      </div>
+
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 18px; gap: 10px;">
+        <button class="btn-secondary" id="btn-paste-to-compose" style="padding: 8px 14px; font-size: 0.85rem;">📋 Paste</button>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn-secondary" onclick="window.closeModal('modal-compose-text')" style="padding: 8px 16px; font-size: 0.85rem;">Cancel</button>
+          <button class="btn-primary" id="btn-stage-composed-text" style="padding: 8px 18px; font-size: 0.85rem; background: var(--accent-pink); border-color: var(--accent-pink);">Stage Text</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- MODAL: FAVORITES -->
+  <!-- ============================================== -->
+  <div class="modal-overlay" id="modal-favorites">
+    <div class="modal-box" style="max-width: 440px; width: 92%; padding: 22px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="#f43f5e" stroke="#f43f5e" stroke-width="1.5"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+          <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700; color: #fff;">Favorite Devices</h3>
+        </div>
+        <button class="btn-icon" onclick="window.closeModal('modal-favorites')">✕</button>
+      </div>
+
+      <div id="favorites-list-container" style="max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <div style="display: flex; justify-content: flex-end;">
+        <button class="btn-primary-gradient" onclick="window.closeModal('modal-favorites')" style="padding: 8px 18px; font-size: 0.9rem;">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- FULL SCREEN DEDICATED TRANSFER VIEW (SENDER & RECEIVER) -->
+  <!-- ============================================== -->
+  <div id="screen-transfer-fullscreen" class="fullscreen-transfer-overlay" style="display: none;">
+    <div class="fullscreen-transfer-inner">
+      <!-- Stage Header -->
+      <div class="fullscreen-transfer-header">
+        <h2 class="fullscreen-transfer-title" id="fs-transfer-title">Sending files</h2>
+        <div class="fullscreen-transfer-subline" id="fs-transfer-subline">To: <span class="dest-link" id="fs-transfer-peer">Remote Device</span></div>
+      </div>
+
+      <!-- File Items Container (Pinned to top, clean list without heavy borders) -->
+      <div class="fullscreen-transfer-body" id="fs-files-container">
+        <!-- Rendered dynamically per file with individual progress bar! -->
+      </div>
+
+      <!-- Sticky Bottom Progress Card -->
+      <div class="live-bottom-card fullscreen-bottom-card">
+        <div class="live-bottom-header">
+          <span class="live-progress-label" id="fs-total-heading">Total Progress (<span id="fs-live-eta">--</span>)</span>
+          <span class="live-pct-label" id="fs-live-pct">0%</span>
+        </div>
+        <div class="live-total-rail">
+          <div class="live-total-bar" id="fs-total-fill"></div>
+        </div>
+        <div class="live-bottom-actions">
+          <button class="btn-live-advanced" id="btn-fs-toggle-advanced">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            Advanced
+          </button>
+          <button class="btn-live-cancel" id="btn-fs-cancel-transfer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Cancel
+          </button>
+          <button class="btn-live-done" id="btn-fs-done-transfer" style="display: none;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            Done
+          </button>
+        </div>
+        <!-- Advanced Dropdown -->
+        <div class="stats-2col" id="fs-advanced-stats" style="display: none; margin-top: 12px;">
+          <div class="stat-pill">
+            <div class="stat-pill-icon cyan">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            </div>
+            <div class="stat-meta">
+              <span class="stat-lbl">Transfer Speed</span>
+              <span class="stat-val" id="fs-live-speed">0.0 MB/s</span>
+            </div>
+          </div>
+          <div class="stat-pill">
+            <div class="stat-pill-icon purple">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div class="stat-meta">
+              <span class="stat-lbl">Remaining</span>
+              <span class="stat-val" id="fs-live-eta-adv">--</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- MODAL 8: SHA-256 ZERO-KNOWLEDGE SECURITY VERIFICATION -->
+  <!-- ============================================== -->
+  <div class="modal-overlay" id="modal-sha-verify">
+    <div class="modal-box modal-box-verify">
+      <div class="verify-icon-wrap">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </div>
+      <h3 class="verify-title">Security Verification</h3>
+      <p class="verify-sub">Ensure this identical SHA-256 security PIN matches the other device.</p>
+      
+      <div class="verify-pin-display" id="verify-modal-pin">#102</div>
+      
+      <div class="verify-fingerprint-box">
+        <div class="verify-fp-label">SHA-256 Session Fingerprint</div>
+        <div class="verify-fp-code" id="verify-modal-fingerprint">8F2A B91C 44E0 31A7 D509 23BB 7104 CE89 1932 F56A 89BC</div>
+      </div>
+
+      <div class="verify-actions">
+        <button class="btn-primary-gradient" onclick="window.closeModal('modal-sha-verify')" style="width: 100%; padding: 10px;">Got it</button>
       </div>
     </div>
   </div>

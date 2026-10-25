@@ -27,6 +27,7 @@ add_executable(BlackHole WIN32 ${SOURCES})
 target_link_libraries(BlackHole PRIVATE
     WebView2LoaderStatic.lib
     ws2_32
+    winhttp
     iphlpapi
     dwmapi
     ole32
@@ -34,6 +35,7 @@ target_link_libraries(BlackHole PRIVATE
     user32
     gdi32
     crypt32
+    ncrypt
 )
 
 # Copy UI directory to build output so BlackHole.exe can find index.html

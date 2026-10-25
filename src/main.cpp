@@ -24,7 +24,9 @@
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "crypt32.lib")
+#pragma comment(lib, "gdiplus.lib")
 #include <wincrypt.h>
+#include <gdiplus.h>
 #include <fstream>
 
 using namespace Microsoft::WRL;
@@ -35,6 +37,7 @@ static ComPtr<ICoreWebView2Controller> g_controller;
 static ComPtr<ICoreWebView2> g_webview;
 static std::unique_ptr<BlackHole::NetworkEngine> g_network;
 static BlackHole::AppSettings g_settings;
+static ULONG_PTR g_gdiplusToken = 0;
 
 #define WM_APP_POST_JSON (WM_APP + 101)
 
@@ -57,6 +60,178 @@ static std::wstring Utf8ToWide(const std::string& str) {
     std::wstring wstr(len - 1, 0);
     MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &wstr[0], len);
     return wstr;
+}
+
+static int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
+    UINT num = 0, size = 0;
+    Gdiplus::GetImageEncodersSize(&num, &size);
+    if (size == 0) return -1;
+    Gdiplus::ImageCodecInfo* pImageCodecInfo = (Gdiplus::ImageCodecInfo*)(malloc(size));
+    if (!pImageCodecInfo) return -1;
+    Gdiplus::GetImageEncoders(num, size, pImageCodecInfo);
+    for (UINT j = 0; j < num; ++j) {
+        if (wcscmp(pImageCodecInfo[j].MimeType, format) == 0) {
+            *pClsid = pImageCodecInfo[j].Clsid;
+            free(pImageCodecInfo);
+            return j;
+        }
+    }
+    free(pImageCodecInfo);
+    return -1;
+}
+
+static bool SaveClipboardBitmapToPng(const std::filesystem::path& outPath) {
+    bool opened = false;
+    for (int retry = 0; retry < 5; ++retry) {
+        if (OpenClipboard(NULL)) {
+            opened = true;
+            break;
+        }
+        Sleep(10);
+    }
+    if (!opened) return false;
+
+    // 1. Direct PNG from clipboard (browsers, Electron apps, etc.)
+    UINT cfPng = RegisterClipboardFormatW(L"PNG");
+    if (cfPng && IsClipboardFormatAvailable(cfPng)) {
+        HANDLE hData = GetClipboardData(cfPng);
+        if (hData) {
+            SIZE_T sz = GlobalSize(hData);
+            void* pData = GlobalLock(hData);
+            if (pData && sz > 0) {
+                std::ofstream out(outPath, std::ios::binary);
+                if (out.is_open()) {
+                    out.write(reinterpret_cast<const char*>(pData), sz);
+                    out.close();
+                    GlobalUnlock(hData);
+                    CloseClipboard();
+                    return true;
+                }
+            }
+            if (pData) GlobalUnlock(hData);
+        }
+    }
+
+    // 2. CF_BITMAP or CF_DIBV5 / CF_DIB (Snipping Tool, Paint, etc.)
+    HBITMAP hBitmap = (HBITMAP)GetClipboardData(CF_BITMAP);
+    bool createdBitmap = false;
+    if (!hBitmap) {
+        HANDLE hDib = GetClipboardData(CF_DIBV5);
+        if (!hDib) hDib = GetClipboardData(CF_DIB);
+        if (hDib) {
+            LPBITMAPINFOHEADER pBmi = (LPBITMAPINFOHEADER)GlobalLock(hDib);
+            if (pBmi) {
+                DWORD headerSize = pBmi->biSize;
+                DWORD numColors = 0;
+                if (pBmi->biBitCount <= 8) {
+                    numColors = pBmi->biClrUsed ? pBmi->biClrUsed : (1 << pBmi->biBitCount);
+                }
+                DWORD masksSize = 0;
+                if (pBmi->biCompression == BI_BITFIELDS && headerSize == sizeof(BITMAPINFOHEADER)) {
+                    masksSize = 3 * sizeof(DWORD);
+                }
+                void* pBits = (char*)pBmi + headerSize + (numColors * sizeof(RGBQUAD)) + masksSize;
+                HDC hdc = GetDC(NULL);
+                hBitmap = CreateDIBitmap(hdc, pBmi, CBM_INIT, pBits, (BITMAPINFO*)pBmi, DIB_RGB_COLORS);
+                ReleaseDC(NULL, hdc);
+                GlobalUnlock(hDib);
+                createdBitmap = (hBitmap != NULL);
+            }
+        }
+    }
+
+    if (!hBitmap) {
+        CloseClipboard();
+        return false;
+    }
+
+    HPALETTE hPalette = (HPALETTE)GetClipboardData(CF_PALETTE);
+    Gdiplus::Bitmap bitmap(hBitmap, hPalette);
+    CloseClipboard();
+
+    CLSID pngClsid;
+    if (GetEncoderClsid(L"image/png", &pngClsid) == -1) {
+        if (createdBitmap) DeleteObject(hBitmap);
+        return false;
+    }
+    Gdiplus::Status status = bitmap.Save(outPath.wstring().c_str(), &pngClsid, NULL);
+    if (createdBitmap) DeleteObject(hBitmap);
+    return (status == Gdiplus::Ok);
+}
+
+static std::vector<std::string> GetClipboardFiles() {
+    std::vector<std::string> files;
+    bool opened = false;
+    for (int retry = 0; retry < 5; ++retry) {
+        if (OpenClipboard(NULL)) {
+            opened = true;
+            break;
+        }
+        Sleep(10);
+    }
+    if (!opened) return files;
+    HDROP hDrop = (HDROP)GetClipboardData(CF_HDROP);
+    if (hDrop) {
+        UINT count = DragQueryFileW(hDrop, 0xFFFFFFFF, NULL, 0);
+        for (UINT i = 0; i < count; ++i) {
+            wchar_t filePath[MAX_PATH];
+            if (DragQueryFileW(hDrop, i, filePath, MAX_PATH)) {
+                files.push_back(WideToUtf8(filePath));
+            }
+        }
+    }
+    CloseClipboard();
+    return files;
+}
+
+// Native Win32 Clipboard helpers
+static std::string GetNativeClipboardText() {
+    bool opened = false;
+    for (int retry = 0; retry < 5; ++retry) {
+        if (OpenClipboard(NULL)) {
+            opened = true;
+            break;
+        }
+        Sleep(10);
+    }
+    if (!opened) return "";
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (!hData) {
+        CloseClipboard();
+        return "";
+    }
+    wchar_t* pszText = static_cast<wchar_t*>(GlobalLock(hData));
+    if (!pszText) {
+        CloseClipboard();
+        return "";
+    }
+    std::wstring wText(pszText);
+    GlobalUnlock(hData);
+    CloseClipboard();
+
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, wText.c_str(), (int)wText.size(), NULL, 0, NULL, NULL);
+    if (size_needed <= 0) return "";
+    std::string strTo(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wText.c_str(), (int)wText.size(), &strTo[0], size_needed, NULL, NULL);
+    return strTo;
+}
+
+static void SetNativeClipboardText(const std::string& text) {
+    if (!OpenClipboard(g_hWnd)) return;
+    EmptyClipboard();
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, NULL, 0);
+    if (wlen > 0) {
+        HGLOBAL hGlobal = GlobalAlloc(GMEM_MOVEABLE, wlen * sizeof(wchar_t));
+        if (hGlobal) {
+            wchar_t* pBuf = static_cast<wchar_t*>(GlobalLock(hGlobal));
+            if (pBuf) {
+                MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, pBuf, wlen);
+                GlobalUnlock(hGlobal);
+                SetClipboardData(CF_UNICODETEXT, hGlobal);
+            }
+        }
+    }
+    CloseClipboard();
 }
 
 static void LogDebug(const std::string& msg) {
@@ -174,10 +349,13 @@ static void HandleWebMessage(const std::string& msgJson) {
         BlackHole::JsonValue sett = BlackHole::JsonValue::Object();
         sett.set("alias", g_settings.alias);
         sett.set("destinationFolder", g_settings.destinationFolder);
+        sett.set("quickSaveMode", g_settings.quickSaveMode);
         sett.set("quickSave", g_settings.quickSave);
+        sett.set("autoCopyText", g_settings.autoCopyText);
         sett.set("port", g_settings.port);
         sett.set("encryptionEnabled", g_settings.encryptionEnabled);
         resp.set("settings", sett);
+        resp.set("deviceFingerprint", g_network ? g_network->getDeviceFingerprint() : "");
 
         // Local IPs
         BlackHole::JsonValue ips = BlackHole::JsonValue::Array();
@@ -193,7 +371,10 @@ static void HandleWebMessage(const std::string& msgJson) {
             pObj.set("ip", p.ip);
             pObj.set("port", p.port);
             pObj.set("alias", p.alias);
+            pObj.set("deviceModel", p.deviceModel);
             pObj.set("deviceType", p.deviceType);
+            pObj.set("fingerprint", p.fingerprint);
+            pObj.set("protocol", p.protocol);
             peers.push(pObj);
         }
         resp.set("peers", peers);
@@ -204,7 +385,9 @@ static void HandleWebMessage(const std::string& msgJson) {
         BlackHole::JsonValue data = req.get("data");
         if (data.has("alias")) g_settings.alias = data.get("alias").asString();
         if (data.has("destinationFolder")) g_settings.destinationFolder = data.get("destinationFolder").asString();
+        if (data.has("quickSaveMode")) g_settings.quickSaveMode = data.get("quickSaveMode").asInt(0);
         if (data.has("quickSave")) g_settings.quickSave = data.get("quickSave").asBool();
+        if (data.has("autoCopyText")) g_settings.autoCopyText = data.get("autoCopyText").asBool(true);
         if (data.has("port")) g_settings.port = data.get("port").asInt(53317);
         if (data.has("encryptionEnabled")) g_settings.encryptionEnabled = data.get("encryptionEnabled").asBool();
 
@@ -214,6 +397,16 @@ static void HandleWebMessage(const std::string& msgJson) {
         BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
         resp.set("type", "settings_saved");
         PostJsonToWebview(resp.serialize());
+    }
+    else if (action == "update_favorites") {
+        BlackHole::JsonValue data = req.get("data");
+        if (data.has("fingerprints")) {
+            std::vector<std::string> fps;
+            for (auto const& item : data.get("fingerprints").arrVal) {
+                fps.push_back(item.asString());
+            }
+            if (g_network) g_network->setFavoriteFingerprints(fps);
+        }
     }
     else if (action == "browse_folder") {
         std::string chosen = BrowseForFolder(g_hWnd);
@@ -246,22 +439,138 @@ static void HandleWebMessage(const std::string& msgJson) {
         std::string folder = req.get("path").asString(g_settings.destinationFolder);
         ShellExecuteA(NULL, "open", folder.c_str(), NULL, NULL, SW_SHOW);
     }
+    else if (action == "save_note_file") {
+        std::string name = req.get("name").asString("note.txt");
+        std::string content = req.get("content").asString("");
+        char tempDir[MAX_PATH];
+        GetTempPathA(MAX_PATH, tempDir);
+        char longTemp[MAX_PATH];
+        if (GetLongPathNameA(tempDir, longTemp, MAX_PATH) > 0) {
+            strcpy_s(tempDir, longTemp);
+        }
+        std::filesystem::path dir = std::filesystem::path(tempDir) / "BlackHole";
+        std::filesystem::create_directories(dir);
+        std::filesystem::path fullPath = dir / name;
+        std::ofstream out(fullPath, std::ios::binary);
+        if (out.is_open()) {
+            out.write(content.data(), content.size());
+            out.close();
+        }
+        BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
+        resp.set("type", "note_saved");
+        resp.set("path", fullPath.string());
+        resp.set("name", name);
+        resp.set("size", static_cast<int64_t>(content.size()));
+        PostJsonToWebview(resp.serialize());
+    }
+    else if (action == "get_clipboard") {
+        std::string txt = GetNativeClipboardText();
+        std::string target = req.get("target").asString("compose");
+        BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
+        resp.set("type", "clipboard_data");
+        resp.set("text", txt);
+        resp.set("target", target);
+        PostJsonToWebview(resp.serialize());
+    }
+    else if (action == "set_clipboard") {
+        std::string txt = req.get("text").asString("");
+        SetNativeClipboardText(txt);
+    }
+    else if (action == "paste_clipboard" || action == "paste_clipboard_file") {
+        // 1. Check if files were copied in File Explorer
+        std::vector<std::string> dropFiles = GetClipboardFiles();
+        if (!dropFiles.empty()) {
+            BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
+            resp.set("type", "files_selected");
+            BlackHole::JsonValue arr = BlackHole::JsonValue::Array();
+            for (auto const& f : dropFiles) {
+                if (std::filesystem::exists(f)) {
+                    BlackHole::JsonValue item = BlackHole::JsonValue::Object();
+                    item.set("name", std::filesystem::path(f).filename().string());
+                    item.set("path", f);
+                    item.set("size", static_cast<int64_t>(std::filesystem::file_size(f)));
+                    arr.push(item);
+                }
+            }
+            resp.set("files", arr);
+            PostJsonToWebview(resp.serialize());
+            return;
+        }
+
+        // 2. Check if an image is in clipboard (screenshot, Snipping tool, copy picture)
+        char tempDir[MAX_PATH];
+        GetTempPathA(MAX_PATH, tempDir);
+        char longTemp[MAX_PATH];
+        if (GetLongPathNameA(tempDir, longTemp, MAX_PATH) > 0) {
+            strcpy_s(tempDir, longTemp);
+        }
+        std::filesystem::path dir = std::filesystem::path(tempDir) / "BlackHole";
+        std::filesystem::create_directories(dir);
+        int64_t nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        std::string imgName = "screenshot_" + std::to_string(nowMs) + ".png";
+        std::filesystem::path imgPath = dir / imgName;
+
+        if (SaveClipboardBitmapToPng(imgPath)) {
+            int64_t imgSize = std::filesystem::file_size(imgPath);
+            BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
+            resp.set("type", "note_saved");
+            resp.set("path", imgPath.string());
+            resp.set("name", imgName);
+            resp.set("size", imgSize);
+            resp.set("isImage", true);
+            PostJsonToWebview(resp.serialize());
+            return;
+        }
+
+        // 3. Check if text is in clipboard
+        std::string txt = GetNativeClipboardText();
+        if (!txt.empty()) {
+            std::string txtName = "clipboard_" + std::to_string(nowMs) + ".txt";
+            std::filesystem::path txtPath = dir / txtName;
+            std::ofstream out(txtPath, std::ios::binary);
+            if (out.is_open()) {
+                out.write(txt.data(), txt.size());
+                out.close();
+            }
+            BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
+            resp.set("type", "note_saved");
+            resp.set("path", txtPath.string());
+            resp.set("name", txtName);
+            resp.set("size", static_cast<int64_t>(txt.size()));
+            resp.set("isClipboard", true);
+            resp.set("text", txt);
+            PostJsonToWebview(resp.serialize());
+            return;
+        }
+
+        // 4. Nothing on clipboard
+        BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
+        resp.set("type", "clipboard_empty");
+        PostJsonToWebview(resp.serialize());
+    }
     else if (action == "send_files") {
         std::string peerIp = req.get("peerIp").asString();
         int peerPort = req.get("peerPort").asInt(53317);
         std::string peerAlias = req.get("peerAlias").asString();
+        std::string protocol = req.get("protocol").asString("blackhole");
         BlackHole::JsonValue filesVal = req.get("files");
         std::vector<std::string> filePaths;
         for (auto const& f : filesVal.arrVal) {
             filePaths.push_back(f.asString());
         }
-        g_network->sendFilesToPeer(peerIp, peerPort, filePaths, peerAlias);
+        g_network->sendFilesToPeer(peerIp, peerPort, filePaths, peerAlias, protocol);
     }
     else if (action == "accept_transfer") {
         g_network->acceptIncomingTransfer();
     }
     else if (action == "reject_transfer") {
         g_network->rejectIncomingTransfer();
+    }
+    else if (action == "accept_text_message") {
+        g_network->acceptIncomingText();
+    }
+    else if (action == "reject_text_message") {
+        g_network->rejectIncomingText();
     }
     else if (action == "cancel_transfer") {
         g_network->cancelTransfer();
@@ -270,9 +579,9 @@ static void HandleWebMessage(const std::string& msgJson) {
         std::string filename = req.get("filename").asString();
         std::string base64Data = req.get("dataBase64").asString();
         if (!filename.empty() && !base64Data.empty()) {
-            std::filesystem::path destDir(g_settings.destinationFolder);
+            std::filesystem::path destDir(Utf8ToWide(g_settings.destinationFolder));
             std::filesystem::create_directories(destDir);
-            std::filesystem::path fullPath = destDir / filename;
+            std::filesystem::path fullPath = destDir / Utf8ToWide(filename);
 
             DWORD binLen = 0;
             if (CryptStringToBinaryA(base64Data.c_str(), (DWORD)base64Data.length(), CRYPT_STRING_BASE64, NULL, &binLen, NULL, NULL)) {
@@ -286,6 +595,92 @@ static void HandleWebMessage(const std::string& msgJson) {
                 }
             }
         }
+    }
+    else if (action == "read_file_chunk") {
+        std::string pathStr = req.get("path").asString();
+        int64_t offset = req.get("offset").asInt(0);
+        int32_t length = req.get("length").asInt(32768);
+        std::string reqId = req.get("requestId").asString();
+
+        BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
+        resp.set("type", "file_chunk_result");
+        resp.set("requestId", reqId);
+
+        std::wstring wpath = Utf8ToWide(pathStr);
+        std::ifstream file(wpath, std::ios::binary);
+        if (!file.is_open()) {
+            resp.set("success", false);
+            resp.set("error", "Failed to open file");
+            resp.set("bytesRead", 0);
+            resp.set("dataBase64", "");
+            resp.set("eof", true);
+            PostJsonToWebview(resp.serialize());
+        } else {
+            file.seekg(offset, std::ios::beg);
+            std::vector<char> buffer(length);
+            file.read(buffer.data(), length);
+            std::streamsize bytesRead = file.gcount();
+            bool isEof = file.eof() || (bytesRead < length);
+
+            std::string b64Str = "";
+            if (bytesRead > 0) {
+                DWORD b64Len = 0;
+                if (CryptBinaryToStringA(reinterpret_cast<const BYTE*>(buffer.data()), (DWORD)bytesRead, CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, NULL, &b64Len)) {
+                    b64Str.resize(b64Len);
+                    CryptBinaryToStringA(reinterpret_cast<const BYTE*>(buffer.data()), (DWORD)bytesRead, CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, &b64Str[0], &b64Len);
+                    while (!b64Str.empty() && (b64Str.back() == '\0' || b64Str.back() == '\r' || b64Str.back() == '\n')) {
+                        b64Str.pop_back();
+                    }
+                }
+            }
+
+            resp.set("success", true);
+            resp.set("bytesRead", static_cast<int64_t>(bytesRead));
+            resp.set("dataBase64", b64Str);
+            resp.set("eof", isEof);
+            PostJsonToWebview(resp.serialize());
+        }
+    }
+    else if (action == "write_file_chunk") {
+        std::string filename = req.get("filename").asString();
+        int64_t offset = req.get("offset").asInt(0);
+        std::string base64Data = req.get("dataBase64").asString();
+        bool isLast = req.get("isLast").asBool(false);
+        std::string reqId = req.get("requestId").asString();
+
+        std::filesystem::path destDir(Utf8ToWide(g_settings.destinationFolder));
+        std::filesystem::create_directories(destDir);
+        std::filesystem::path fullPath = destDir / Utf8ToWide(filename);
+
+        DWORD binLen = 0;
+        bool ok = false;
+        if (CryptStringToBinaryA(base64Data.c_str(), (DWORD)base64Data.length(), CRYPT_STRING_BASE64, NULL, &binLen, NULL, NULL)) {
+            std::vector<BYTE> buffer(binLen);
+            if (CryptStringToBinaryA(base64Data.c_str(), (DWORD)base64Data.length(), CRYPT_STRING_BASE64, buffer.data(), &binLen, NULL, NULL)) {
+                std::ofstream out;
+                if (offset == 0) {
+                    out.open(fullPath, std::ios::binary | std::ios::trunc);
+                } else {
+                    out.open(fullPath, std::ios::binary | std::ios::in | std::ios::out);
+                    if (!out.is_open()) {
+                        out.open(fullPath, std::ios::binary | std::ios::app);
+                    }
+                    out.seekp(offset, std::ios::beg);
+                }
+                if (out.is_open()) {
+                    out.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+                    out.close();
+                    ok = true;
+                }
+            }
+        }
+
+        BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
+        resp.set("type", "write_chunk_result");
+        resp.set("requestId", reqId);
+        resp.set("success", ok);
+        resp.set("isLast", isLast);
+        PostJsonToWebview(resp.serialize());
     }
     else if (action == "set_shared_files") {
         BlackHole::JsonValue filesVal = req.get("files");
@@ -330,7 +725,10 @@ static void HandleWebMessage(const std::string& msgJson) {
             pObj.set("ip", p.ip);
             pObj.set("port", p.port);
             pObj.set("alias", p.alias);
+            pObj.set("deviceModel", p.deviceModel);
             pObj.set("deviceType", p.deviceType);
+            pObj.set("fingerprint", p.fingerprint);
+            pObj.set("protocol", p.protocol);
             peers.push(pObj);
         }
         resp.set("peers", peers);
@@ -491,6 +889,17 @@ static void InitializeWebView(HWND hWnd, const std::wstring& baseDataDir, bool i
                             );
                             LogDebug("Step 4: add_WebMessageReceived done");
 
+                            // Auto-grant clipboard read/write and notification permissions permanently without prompts
+                            EventRegistrationToken permToken;
+                            g_webview->add_PermissionRequested(
+                                Callback<ICoreWebView2PermissionRequestedEventHandler>(
+                                    [](ICoreWebView2*, ICoreWebView2PermissionRequestedEventArgs* args) -> HRESULT {
+                                        args->put_State(COREWEBVIEW2_PERMISSION_STATE_ALLOW);
+                                        return S_OK;
+                                    }).Get(),
+                                &permToken
+                            );
+
                             // Auto-save incoming downloaded files directly to destinationFolder without prompts
                             ComPtr<ICoreWebView2_4> webview4;
                             if (SUCCEEDED(g_webview.As(&webview4)) && webview4) {
@@ -576,13 +985,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         LogDebug("Mutex existed but no window found - proceeding with fresh startup");
     }
 
+    LogDebug("WinMain: CoInitializeEx");
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
+    LogDebug("WinMain: GdiplusStartup");
+    // Initialize GDI+ for image processing (saving clipboard screenshots, etc.)
+    Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+    Gdiplus::GdiplusStartup(&g_gdiplusToken, &gdiplusStartupInput, NULL);
+
+    LogDebug("WinMain: ConfigManager::load");
     // Load Settings
     g_settings = BlackHole::ConfigManager::load();
 
+    LogDebug("WinMain: make_unique<NetworkEngine>");
     // Start Network Engine
     g_network = std::make_unique<BlackHole::NetworkEngine>();
+    LogDebug("WinMain: NetworkEngine created");
     g_network->setPeerCallback([](const std::vector<BlackHole::PeerDevice>& peers) {
         BlackHole::JsonValue resp = BlackHole::JsonValue::Object();
         resp.set("type", "peers_updated");
@@ -592,7 +1010,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             pObj.set("ip", p.ip);
             pObj.set("port", p.port);
             pObj.set("alias", p.alias);
+            pObj.set("deviceModel", p.deviceModel);
             pObj.set("deviceType", p.deviceType);
+            pObj.set("fingerprint", p.fingerprint);
+            pObj.set("protocol", p.protocol);
             arr.push(pObj);
         }
         resp.set("peers", arr);
@@ -615,6 +1036,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         resp.set("speedMBs", ev.speedMBs);
         resp.set("progressPercent", ev.progressPercent);
         resp.set("message", ev.message);
+        resp.set("textContent", ev.textContent);
         resp.set("fileCount", ev.fileCount);
 
         BlackHole::JsonValue fNames = BlackHole::JsonValue::Array();
@@ -695,6 +1117,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     if (hMutex) {
         CloseHandle(hMutex);
+    }
+
+    if (g_gdiplusToken) {
+        Gdiplus::GdiplusShutdown(g_gdiplusToken);
+        g_gdiplusToken = 0;
     }
 
     CoUninitialize();

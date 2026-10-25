@@ -6,10 +6,12 @@ namespace BlackHole {
 struct AppSettings {
     std::string alias = "BlackHole-PC";
     std::string destinationFolder = "";
-    bool quickSave = false;
+    int quickSaveMode = 0; // 0: Off, 1: Favorites, 2: Always
+    bool quickSave = false; // true if quickSaveMode == 2
     int port = 53317;
     bool encryptionEnabled = true;
     bool minimizeToTray = true;
+    bool autoCopyText = true;
 };
 
 class ConfigManager {
